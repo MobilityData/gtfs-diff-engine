@@ -73,8 +73,10 @@ class TestCapOption:
         result = runner.invoke(main, [str(base), str(new), "--cap", "0"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
+        # cap=0 suppresses all row-level detail; row_changes is omitted from JSON
+        # (exclude_none=True). True counts are still visible in summary.files.
         for fd in data["file_diffs"]:
-            assert fd["row_changes"] is None
+            assert "row_changes" not in fd
 
     def test_cap_stored_in_metadata(self, tmp_path: Path):
         base, new = _make_feeds(tmp_path)

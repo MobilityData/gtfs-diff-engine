@@ -56,7 +56,7 @@ def main(
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    json_str = result.model_dump_json(indent=2) if pretty else result.model_dump_json()
+    json_str = result.model_dump_json(indent=2, exclude_none=True) if pretty else result.model_dump_json(exclude_none=True)
 
     if output is not None:
         try:

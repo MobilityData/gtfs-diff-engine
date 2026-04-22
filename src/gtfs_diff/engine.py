@@ -333,6 +333,9 @@ def _diff_file(
     true_modified = len(modified_candidates)
 
     # Determine row-changes output based on cap.
+    # cap=0 means "summary counts only" — row_changes is omitted from the output
+    # entirely (serialized as null, excluded by exclude_none=True in the CLI).
+    # True counts are still computed and surfaced in summary.files.
     include_row_changes: bool
     if row_changes_cap == 0:
         include_row_changes = False
@@ -490,6 +493,19 @@ def diff_feeds(
                 new_opener=new_opener,
                 row_changes_cap=row_changes_cap_per_file,
             )
+
+            # Per spec: file_diffs[] contains only *changed* files.
+            # Skip files present in both feeds with no actual changes.
+            if (
+                file_summary.status == "modified"
+                and not file_summary.columns_added_count
+                and not file_summary.columns_deleted_count
+                and not file_summary.rows_added_count
+                and not file_summary.rows_deleted_count
+                and not file_summary.rows_modified_count
+            ):
+                continue
+
             file_diffs.append(file_diff)
             file_summaries.append(file_summary)
 

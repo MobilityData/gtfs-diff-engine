@@ -105,12 +105,9 @@ class TestIdenticalFeeds:
         base = write_zip(tmp_path / "base.zip", {"stops.txt": content})
         new = write_zip(tmp_path / "new.zip", {"stops.txt": content})
         result = diff_feeds(base, new)
-        fd = _get_file_diff(result, "stops.txt")
-        assert fd.file_action == "modified"
-        assert fd.row_changes is not None
-        assert fd.row_changes.added == []
-        assert fd.row_changes.deleted == []
-        assert fd.row_changes.modified == []
+        assert result.file_diffs == []
+        assert result.summary.files_modified_count == 0
+        assert result.summary.total_changes == 0
 
 
 # ---------------------------------------------------------------------------

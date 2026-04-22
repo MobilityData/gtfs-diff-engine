@@ -1,0 +1,13 @@
+annotated-types==0.7.0
+click==8.3.2
+coverage==7.13.5
+iniconfig==2.3.0
+packaging==26.1
+pluggy==1.6.0
+pydantic==2.13.3
+pydantic_core==2.46.3
+Pygments==2.20.0
+pytest==9.0.3
+pytest-cov==7.1.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0

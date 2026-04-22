@@ -69,6 +69,7 @@ def _read_headers(text_io: TextIO) -> list[str]:
 def _read_csv_index(
     text_io: TextIO,
     pk_columns: list[str] | None = None,
+    file_name: str = "<unknown>",
 ) -> tuple[list[str], dict[tuple, tuple[int, str]]]:
     """Stream a CSV file and build a primary-key → (line_number, raw_csv_string) index.
 
@@ -76,12 +77,19 @@ def _read_csv_index(
         text_io:    Open text stream for the CSV file (utf-8-sig recommended).
         pk_columns: Columns that form the primary key.  `None` / empty list
                     means use *all* columns as the composite key.
+        file_name:  Used in error messages only.
 
     Returns:
         headers: Stripped column names from the header row.
         index:   Maps `pk_tuple` → `(line_number, raw_csv_string)`.
                  Line numbers are 1-based; the header row is line 1, so the
                  first data row is line 2.
+
+    Raises:
+        ValueError: If expected primary key columns are absent from the header
+                    (diff would silently treat all rows as identical), or if
+                    duplicate primary key values are found (diff would silently
+                    discard earlier rows).
     """
     reader = csv.reader(text_io)
     try:
@@ -93,6 +101,13 @@ def _read_csv_index(
     n = len(headers)
     effective_pk = pk_columns if pk_columns else headers
 
+    if pk_columns:
+        missing = [col for col in pk_columns if col not in set(headers)]
+        if missing:
+            raise ValueError(
+                f"{file_name}: primary key column(s) {missing} not found in headers {headers}."
+            )
+
     index: dict[tuple, tuple[int, str]] = {}
     for line_num, row in enumerate(reader, start=2):
         # Pad short rows; trim rows wider than the header (malformed CSV safety).
@@ -101,6 +116,13 @@ def _read_csv_index(
         row_vals = row[:n]
         row_dict = dict(zip(headers, row_vals))
         pk_tuple = tuple(row_dict.get(col, "") for col in effective_pk)
+
+        if pk_tuple in index:
+            raise ValueError(
+                f"{file_name}: duplicate primary key {dict(zip(effective_pk, pk_tuple))} "
+                f"at line {line_num} (first seen at line {index[pk_tuple][0]})."
+            )
+
         index[pk_tuple] = (line_num, _row_to_csv(row_vals))
 
     return headers, index
@@ -267,10 +289,10 @@ def _diff_file(
 
     # Build indexes (two streaming passes, one per file).
     with base_opener() as f:
-        base_headers, base_index = _read_csv_index(f, pk_cols)
+        base_headers, base_index = _read_csv_index(f, pk_cols, file_name=file_name)
 
     with new_opener() as f:
-        new_headers, new_index = _read_csv_index(f, pk_cols)
+        new_headers, new_index = _read_csv_index(f, pk_cols, file_name=file_name)
 
     # Column-level diff
     base_header_set = set(base_headers)
@@ -286,6 +308,11 @@ def _diff_file(
         for i, col in enumerate(base_headers)
         if col not in new_header_set
     ]
+    # Should a column reorder (same columns, different positions) be reported as a change?
+    # Currently it is silently ignored — values are always compared by column name, not
+    # position. A producer reordering columns without changing any data would produce no
+    # diff at all. Is that the desired behaviour, or should we surface a "columns_reordered"
+    # signal for consumers that care about canonical column ordering?
 
     # Union columns: base order first, then new-only columns appended.
     new_only_cols = [col for col in new_headers if col not in base_header_set]
@@ -300,6 +327,11 @@ def _diff_file(
     added_keys = new_keys - base_keys
     deleted_keys = base_keys - new_keys
     common_keys = base_keys & new_keys
+    # Should a row reorder (same rows, different line positions) be reported as a change?
+    # Currently it is silently ignored — keys are compared as sets, so row order has no
+    # effect on the diff output. A producer that sorts rows differently without changing
+    # any data would produce no diff at all. Is that the desired behaviour, or should we
+    # surface line-number shifts as a signal for consumers that care about row ordering?
 
     # For modified-row detection, compare only the *shared* columns to avoid
     # flagging every row when a column is added to / removed from the file.

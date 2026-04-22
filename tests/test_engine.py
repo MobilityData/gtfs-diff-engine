@@ -219,6 +219,36 @@ class TestNoFalsePositives:
         assert "S2" not in modified_ids
         assert "S3" in modified_ids
 
+    def test_swapped_row_order_is_not_a_change(self, tmp_path: Path):
+        # Row order is irrelevant — the engine indexes by primary key.
+        # Swapping two rows must not produce any diff.
+        # NOTE: should a row reorder be reported as a structural change even when
+        # no field values differ? This is currently an open design question.
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\nS2,Stop Two,3.0,4.0\n",
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S2,Stop Two,3.0,4.0\nS1,Stop One,1.0,2.0\n",
+        })
+        result = diff_feeds(base, new)
+        assert result.file_diffs == []
+        assert result.summary.total_changes == 0
+
+    def test_swapped_column_order_is_not_a_change(self, tmp_path: Path):
+        # Column order is irrelevant — the engine compares values by column name.
+        # Swapping two columns must not produce any diff.
+        # NOTE: should a column reorder be reported as a structural change even when
+        # no field values differ? This is currently an open design question.
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_id,stop_name,stop_lat\nS1,Stop One,1.0\n",
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": "stop_name,stop_id,stop_lat\nStop One,S1,1.0\n",
+        })
+        result = diff_feeds(base, new)
+        assert result.file_diffs == []
+        assert result.summary.total_changes == 0
+
 
 # ---------------------------------------------------------------------------
 # Column-level tests

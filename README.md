@@ -27,8 +27,8 @@ pip install gtfs-diff-engine
 For a development (editable) install with test dependencies:
 
 ```bash
-git clone https://github.com/your-org/gtfs_diff_engine
-cd gtfs_diff_engine
+git clone https://github.com/your-org/gtfs-diff-engine
+cd gtfs-diff-engine
 pip install -e ".[dev]"
 ```
 

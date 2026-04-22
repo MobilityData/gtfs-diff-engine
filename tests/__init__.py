@@ -1,1 +1,1 @@
-"""Test suite for gtfs_diff."""
+"""Test suite for gtfs-diff."""

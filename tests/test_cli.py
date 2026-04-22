@@ -1,4 +1,4 @@
-"""Tests for gtfs_diff.cli."""
+"""Tests for gtfs-diff.cli."""
 
 from __future__ import annotations
 

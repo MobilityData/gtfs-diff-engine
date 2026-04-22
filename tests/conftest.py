@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the gtfs_diff test suite."""
+"""Shared pytest fixtures for the gtfs-diff test suite."""
 
 from __future__ import annotations
 

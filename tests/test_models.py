@@ -1,4 +1,4 @@
-"""Tests for gtfs_diff.models."""
+"""Tests for gtfs-diff.models."""
 
 from __future__ import annotations
 

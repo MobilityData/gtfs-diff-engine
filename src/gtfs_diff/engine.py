@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import csv
 import io
+import resource
+import sys
+import time
 import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -38,6 +41,14 @@ from .models import (
 )
 
 SCHEMA_VERSION = "2.0"
+
+
+def _trace(msg: str) -> None:
+    """Print a timestamped progress message with current peak RSS to stderr."""
+    rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # macOS returns bytes; Linux returns kilobytes
+    rss_mb = rss_bytes / 1024 / 1024 if sys.platform == "darwin" else rss_bytes / 1024
+    print(f"[gtfs-diff {datetime.now().strftime('%H:%M:%S')} {rss_mb:.0f}MB] {msg}", file=sys.stderr, flush=True)
 
 # A "lazy opener" maps a filename (e.g. "stops.txt") to a zero-arg callable
 # that opens the file and returns a text stream.
@@ -289,10 +300,16 @@ def _diff_file(
 
     # Build indexes (two streaming passes, one per file).
     with base_opener() as f:
+        _trace(f"  [{file_name}] indexing base feed...")
+        t0 = time.monotonic()
         base_headers, base_index = _read_csv_index(f, pk_cols, file_name=file_name)
+        _trace(f"  [{file_name}] base index done: {len(base_index):,} rows in {time.monotonic()-t0:.1f}s")
 
     with new_opener() as f:
+        _trace(f"  [{file_name}] indexing new feed...")
+        t0 = time.monotonic()
         new_headers, new_index = _read_csv_index(f, pk_cols, file_name=file_name)
+        _trace(f"  [{file_name}] new index done:  {len(new_index):,} rows in {time.monotonic()-t0:.1f}s")
 
     # Column-level diff
     base_header_set = set(base_headers)
@@ -348,6 +365,8 @@ def _diff_file(
     # We count true modified while building; detect first to get true count.
     modified_candidates: list[tuple[tuple, list[FieldChange], int, int]] = []
 
+    _trace(f"  [{file_name}] scanning {len(common_keys):,} common rows for modifications...")
+    t0 = time.monotonic()
     for pk_tuple in common_keys:
         b_line, b_raw = base_index[pk_tuple]
         n_line, n_raw = new_index[pk_tuple]
@@ -363,6 +382,7 @@ def _diff_file(
             modified_candidates.append((pk_tuple, field_changes, b_line, n_line))
 
     true_modified = len(modified_candidates)
+    _trace(f"  [{file_name}] scan done in {time.monotonic()-t0:.1f}s — added={true_added:,} deleted={true_deleted:,} modified={true_modified:,}")
 
     # Determine row-changes output based on cap.
     # cap=0 means "summary counts only" — row_changes is omitted from the output
@@ -496,8 +516,10 @@ def diff_feeds(
 
     with _open_feed(base_path) as base_openers, _open_feed(new_path) as new_openers:
         all_files = sorted(set(base_openers) | set(new_openers))
+        _trace(f"Found {len(all_files)} file(s) to process: {', '.join(all_files)}")
 
         for file_name in all_files:
+            _trace(f"Processing {file_name}...")
             in_base = file_name in base_openers
             in_new = file_name in new_openers
 

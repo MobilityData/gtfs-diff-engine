@@ -149,6 +149,23 @@ def _parse_raw_line(raw_line: str, headers: list[str]) -> dict[str, str]:
     return dict(zip(headers, row))
 
 
+def _values_differ(a: str, b: str) -> bool:
+    """Return True if two field values represent meaningfully different data.
+
+    String-identical values are equal (fast path).
+    If they differ as strings, attempt numeric comparison — this silently
+    ignores cosmetic differences like trailing zeros in coordinate fields
+    (e.g. '-73.55625' vs '-73.556250').
+    Non-numeric strings fall back to string equality.
+    """
+    if a == b:
+        return False
+    try:
+        return float(a) != float(b)
+    except (ValueError, OverflowError):
+        return True
+
+
 def _compute_raw_value(
     row_dict: dict[str, str],
     columns: list[str],
@@ -374,7 +391,7 @@ def _diff_file(
         field_changes = [
             FieldChange(field=col, base_value=b_dict[col], new_value=n_dict[col])
             for col in shared_cols
-            if b_dict.get(col, "") != n_dict.get(col, "")
+            if _values_differ(b_dict.get(col, ""), n_dict.get(col, ""))
         ]
         if field_changes:
             modified_candidates.append((pk_tuple, field_changes, b_line, n_line))

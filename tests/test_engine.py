@@ -234,6 +234,25 @@ class TestNoFalsePositives:
         assert result.file_diffs == []
         assert result.summary.total_changes == 0
 
+    def test_trailing_zeros_in_coordinates_are_not_a_change(self, tmp_path: Path):
+        # A producer may write '-73.55625' in one version and '-73.556250' in the
+        # next. These are numerically identical and must not be reported as a diff.
+        base = write_zip(tmp_path / "base.zip", {
+            "shapes.txt": (
+                "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+                "11071,45.518332,-73.55625,150001\n"
+            ),
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "shapes.txt": (
+                "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+                "11071,45.518332,-73.556250,150001\n"
+            ),
+        })
+        result = diff_feeds(base, new)
+        assert result.file_diffs == []
+        assert result.summary.total_changes == 0
+
     def test_swapped_column_order_is_not_a_change(self, tmp_path: Path):
         # Column order is irrelevant — the engine compares values by column name.
         # Swapping two columns must not produce any diff.

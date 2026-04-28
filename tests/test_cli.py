@@ -48,7 +48,7 @@ class TestDiffToStdout:
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new)])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert "metadata" in data
         assert "summary" in data
         assert "file_diffs" in data
@@ -72,7 +72,7 @@ class TestCapOption:
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new), "--cap", "0"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         # cap=0 suppresses all row-level detail; row_changes is omitted from JSON
         # (exclude_none=True). True counts are still visible in summary.files.
         for fd in data["file_diffs"]:
@@ -83,7 +83,7 @@ class TestCapOption:
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new), "--cap", "5"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert data["metadata"]["row_changes_cap_per_file"] == 5
 
 
@@ -103,8 +103,8 @@ class TestPrettyJson:
         result = runner.invoke(main, [str(base), str(new), "--pretty"])
         assert result.exit_code == 0, result.output
         # Indented JSON contains newlines beyond just the top level
-        assert "\n" in result.output
-        assert "  " in result.output  # indentation present
+        assert "\n" in result.stdout
+        assert "  " in result.stdout  # indentation present
 
     def test_no_pretty_output_is_compact(self, tmp_path: Path):
         base, new = _make_feeds(tmp_path)
@@ -112,5 +112,5 @@ class TestPrettyJson:
         result = runner.invoke(main, [str(base), str(new), "--no-pretty"])
         assert result.exit_code == 0, result.output
         # Should be valid JSON even without pretty-printing
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         assert "metadata" in data

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import csv
 import io
-import resource
 import sys
 import time
 import zipfile
@@ -44,10 +43,9 @@ SCHEMA_VERSION = "2.0"
 
 
 def _trace(msg: str) -> None:
-    """Print a timestamped progress message with current peak RSS to stderr."""
-    rss_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # macOS returns bytes; Linux returns kilobytes
-    rss_mb = rss_bytes / 1024 / 1024 if sys.platform == "darwin" else rss_bytes / 1024
+    """Print a timestamped progress message with current RSS to stderr."""
+    import psutil
+    rss_mb = psutil.Process().memory_info().rss / 1024 / 1024
     print(f"[gtfs-diff {datetime.now().strftime('%H:%M:%S')} {rss_mb:.0f}MB] {msg}", file=sys.stderr, flush=True)
 
 # A "lazy opener" maps a filename (e.g. "stops.txt") to a zero-arg callable
@@ -593,4 +591,6 @@ def diff_feeds(
         files_modified_count=files_modified,
         files=file_summaries,
     )
-    return GtfsDiff(metadata=metadata, summary=summary, file_diffs=file_diffs)
+    result = GtfsDiff(metadata=metadata, summary=summary, file_diffs=file_diffs)
+    _trace("diff_feeds complete")
+    return result

@@ -126,10 +126,11 @@ class ShapesDiffResult:
             "─" * 60,
         ]
         for base_id, new_id in sorted(self.shape_id_mapping.items()):
+            if base_id == new_id:
+                continue
             modified = any(sd.base_shape_id == base_id for sd in self.shapes_modified)
             tag = "  [MODIFIED]" if modified else ""
-            id_label = f"{base_id} -> {new_id}" if base_id != new_id else base_id
-            lines.append(f"  {id_label}{tag}")
+            lines.append(f"  {base_id} -> {new_id}{tag}")
         for sr in self.shapes_removed:
             lines.append(f"  {sr.shape_id} -> (removed)")
         for sa in self.shapes_added:
@@ -223,10 +224,14 @@ def _coord_fingerprint(pts: _ShapePoints, decimals: int = 5) -> frozenset[tuple[
 def _match_shapes_by_geometry(
     s1: dict[str, _ShapePoints],
     s2: dict[str, _ShapePoints],
+    min_match_score: float = 0.05,
 ) -> dict[str, tuple[str, float]]:
     """
     Phase 1: greedily match each shape in s1 to the best-scoring shape in s2
     using Jaccard similarity of coordinate fingerprints.
+
+    Pairs whose best score is below min_match_score are not matched and will
+    be reported as removed/added rather than modified.
 
     Returns {base_id: (new_id, score)}.
     """
@@ -245,7 +250,7 @@ def _match_shapes_by_geometry(
             score = len(fp1 & fp) / max(len(fp1), len(fp), 1)
             if score > best_score:
                 best_score, best_id = score, sid2
-        if best_id is not None:
+        if best_id is not None and best_score >= min_match_score:
             matches[sid1] = (best_id, best_score)
             used.add(best_id)
         if i % max(1, total // 10) == 0 or i == total:
@@ -324,6 +329,7 @@ def content_addressed_polyline_diff(
     new_file: str | Path,
     coord_tolerance_m: float = 0.0,
     match_tolerance_m: float = 0.1,
+    min_match_score: float = 0.05,
 ) -> ShapesDiffResult:
     """
     Compare two GTFS shapes.txt files using a Two-Phase Content-Addressed
@@ -338,6 +344,10 @@ def content_addressed_polyline_diff(
         match_tolerance_m: Distance (metres) used to pair unmatched points by
                            coordinate proximity when resolving sequence-number
                            changes vs true adds/removes. Default 0.1 m.
+        min_match_score:   Minimum Jaccard similarity (0–1) required to consider
+                           two shapes a geometric match. Pairs below this threshold
+                           are reported as removed/added rather than modified.
+                           Default 0.05.
 
     Returns:
         ShapesDiffResult containing added, removed, and modified shapes with
@@ -346,7 +356,7 @@ def content_addressed_polyline_diff(
     s1 = _parse_shapes(base_file)
     s2 = _parse_shapes(new_file)
 
-    matches = _match_shapes_by_geometry(s1, s2)
+    matches = _match_shapes_by_geometry(s1, s2, min_match_score)
     matched_new_ids = {new_id for new_id, _ in matches.values()}
 
     result = ShapesDiffResult(

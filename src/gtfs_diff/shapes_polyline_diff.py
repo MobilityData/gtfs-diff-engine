@@ -216,6 +216,33 @@ def _parse_shapes(path: str | Path) -> dict[str, _ShapePoints]:
     return dict(shapes)
 
 
+def _read_shape_ids(path: str | Path) -> set[str]:
+    """Single-pass scan returning only the shape_id values — no coordinate parsing."""
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        return {row["shape_id"] for row in csv.DictReader(fh)}
+
+
+def _id_churn_rate(base_ids: set[str], new_ids: set[str]) -> float:
+    """
+    Fraction of shape IDs that differ between feeds.
+
+    0.0 → all IDs identical (match by ID, skip geometry matching).
+    1.0 → no IDs in common (full regeneration, must use geometry matching).
+    """
+    total = max(len(base_ids), len(new_ids))
+    if total == 0:
+        return 0.0
+    changed = len(base_ids - new_ids) + len(new_ids - base_ids)
+    return changed / total
+
+
+def _match_shapes_by_id(
+    common_ids: set[str],
+) -> dict[str, tuple[str, float]]:
+    """Trivial 1-to-1 match for IDs present in both feeds (score = 1.0)."""
+    return {sid: (sid, 1.0) for sid in common_ids}
+
+
 def _coord_fingerprint(pts: _ShapePoints, decimals: int = 5) -> frozenset[tuple[float, float]]:
     """Rounded coordinate set used for Jaccard-based shape matching."""
     return frozenset((round(lat, decimals), round(lon, decimals)) for _, lat, lon in pts)
@@ -356,7 +383,32 @@ def content_addressed_polyline_diff(
     s1 = _parse_shapes(base_file)
     s2 = _parse_shapes(new_file)
 
-    matches = _match_shapes_by_geometry(s1, s2, min_match_score)
+    # --- Fast-path: compute ID churn before geometry matching ---------------
+    base_ids, new_ids = set(s1), set(s2)
+    churn = _id_churn_rate(base_ids, new_ids)
+    _trace(f"ID churn rate: {churn:.3f}")
+
+    common_ids   = base_ids & new_ids
+    only_in_base = base_ids - new_ids
+    only_in_new  = new_ids  - base_ids
+
+    if churn == 0.0:
+        # IDs are identical — skip geometry matching entirely.
+        _trace("IDs unchanged — skipping Phase 1, matching by ID directly.")
+        matches = _match_shapes_by_id(common_ids)
+    else:
+        # Match common IDs directly; run geometry matching only on the remainder.
+        matches = _match_shapes_by_id(common_ids)
+        if only_in_base or only_in_new:
+            _trace(
+                f"Running geometry matching on {len(only_in_base)} unmatched base "
+                f"shapes and {len(only_in_new)} unmatched new shapes ..."
+            )
+            s1_unmatched = {sid: s1[sid] for sid in only_in_base}
+            s2_unmatched = {sid: s2[sid] for sid in only_in_new}
+            geo_matches = _match_shapes_by_geometry(s1_unmatched, s2_unmatched, min_match_score)
+            matches.update(geo_matches)
+    # ------------------------------------------------------------------------
     matched_new_ids = {new_id for new_id, _ in matches.values()}
 
     result = ShapesDiffResult(

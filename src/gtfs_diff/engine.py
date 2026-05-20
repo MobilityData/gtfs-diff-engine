@@ -42,6 +42,19 @@ from .models import (
 SCHEMA_VERSION = "2.0"
 
 
+class MissingPrimaryKeyError(ValueError):
+    """Raised when a required primary key column is absent from a file's headers."""
+
+    def __init__(self, file_name: str, missing_columns: list[str], headers: list[str]) -> None:
+        self.file_name = file_name
+        self.missing_columns = missing_columns
+        self.headers = headers
+        super().__init__(
+            f"'{file_name}': required primary key column(s) {missing_columns} "
+            f"not found in headers {headers}."
+        )
+
+
 def _trace(msg: str) -> None:
     """Print a timestamped progress message with current RSS to stderr."""
     import psutil
@@ -95,10 +108,10 @@ def _read_csv_index(
                  first data row is line 2.
 
     Raises:
-        ValueError: If expected primary key columns are absent from the header
-                    (diff would silently treat all rows as identical), or if
-                    duplicate primary key values are found (diff would silently
-                    discard earlier rows).
+        MissingPrimaryKeyError: If expected primary key columns are absent from
+                    the header (diff would silently treat all rows as identical).
+        ValueError: If duplicate primary key values are found (diff would
+                    silently discard earlier rows).
     """
     reader = csv.reader(text_io)
     try:
@@ -113,9 +126,7 @@ def _read_csv_index(
     if pk_columns:
         missing = [col for col in pk_columns if col not in set(headers)]
         if missing:
-            raise ValueError(
-                f"{file_name}: primary key column(s) {missing} not found in headers {headers}."
-            )
+            raise MissingPrimaryKeyError(file_name, missing, headers)
 
     index: dict[tuple, tuple[int, str]] = {}
     for line_num, row in enumerate(reader, start=2):
@@ -158,6 +169,8 @@ def _values_differ(a: str, b: str) -> bool:
     (e.g. '-73.55625' vs '-73.556250').
     Non-numeric strings fall back to string equality.
     """
+    a = a.strip(),
+    b = b.strip()
     if a == b:
         return False
     try:
@@ -242,74 +255,157 @@ def _diff_file(
     new_opener: Callable[[], TextIO] | None,
     row_changes_cap: int | None,
 ) -> tuple[FileDiff, FileSummary]:
-    """Compute the complete diff for one GTFS file.
-
-    Returns a (FileDiff, FileSummary) pair.
-    """
-    # ------------------------------------------------------------------
-    # File added (only in new feed)
-    # ------------------------------------------------------------------
+    """Dispatch to the appropriate diff helper based on feed presence."""
     if base_opener is None:
         assert new_opener is not None
-        with new_opener() as f:
-            new_headers = _read_headers(f)
-        columns_added = [
-            ColumnEntry(name=col, position=i + 1)
-            for i, col in enumerate(new_headers)
-        ]
-        file_diff = FileDiff(
-            file_name=file_name,
-            file_action="added",
-            columns_added=columns_added,
-            columns_deleted=[],
-            row_changes=None,
-            truncated=None,
-        )
-        summary = FileSummary(
-            file_name=file_name,
-            status="added",
-            columns_added_count=len(columns_added),
-            columns_deleted_count=0,
-        )
-        return file_diff, summary
-
-    # ------------------------------------------------------------------
-    # File deleted (only in base feed)
-    # ------------------------------------------------------------------
+        return _diff_file_added(file_name, new_opener)
     if new_opener is None:
-        with base_opener() as f:
-            base_headers = _read_headers(f)
-        columns_deleted = [
-            ColumnEntry(name=col, position=i + 1)
-            for i, col in enumerate(base_headers)
-        ]
-        file_diff = FileDiff(
-            file_name=file_name,
-            file_action="deleted",
-            columns_added=[],
-            columns_deleted=columns_deleted,
-            row_changes=None,
-            truncated=None,
-        )
-        summary = FileSummary(
-            file_name=file_name,
-            status="deleted",
-            columns_added_count=0,
-            columns_deleted_count=len(columns_deleted),
-        )
-        return file_diff, summary
+        return _diff_file_deleted(file_name, base_opener)
+    return _diff_file_modified(file_name, base_opener, new_opener, row_changes_cap)
 
-    # ------------------------------------------------------------------
-    # File present in both feeds
-    # ------------------------------------------------------------------
+
+def _diff_file_added(
+    file_name: str,
+    new_opener: Callable[[], TextIO],
+) -> tuple[FileDiff, FileSummary]:
+    """Build a diff result for a file that exists only in the new feed."""
+    with new_opener() as f:
+        new_headers = _read_headers(f)
+    columns_added = [
+        ColumnEntry(name=col, position=i + 1)
+        for i, col in enumerate(new_headers)
+    ]
+    file_diff = FileDiff(
+        file_name=file_name,
+        file_action="added",
+        columns_added=columns_added,
+        columns_deleted=[],
+        row_changes=None,
+        truncated=None,
+    )
+    summary = FileSummary(
+        file_name=file_name,
+        status="added",
+        columns_added_count=len(columns_added),
+        columns_deleted_count=0,
+    )
+    return file_diff, summary
+
+
+def _diff_file_deleted(
+    file_name: str,
+    base_opener: Callable[[], TextIO],
+) -> tuple[FileDiff, FileSummary]:
+    """Build a diff result for a file that exists only in the base feed."""
+    with base_opener() as f:
+        base_headers = _read_headers(f)
+    columns_deleted = [
+        ColumnEntry(name=col, position=i + 1)
+        for i, col in enumerate(base_headers)
+    ]
+    file_diff = FileDiff(
+        file_name=file_name,
+        file_action="deleted",
+        columns_added=[],
+        columns_deleted=columns_deleted,
+        row_changes=None,
+        truncated=None,
+    )
+    summary = FileSummary(
+        file_name=file_name,
+        status="deleted",
+        columns_added_count=0,
+        columns_deleted_count=len(columns_deleted),
+    )
+    return file_diff, summary
+
+
+def _diff_columns(
+    base_headers: list[str],
+    new_headers: list[str],
+) -> tuple[list[ColumnEntry], list[ColumnEntry], list[str]]:
+    """Compute column-level differences between two header lists.
+
+    Returns:
+        columns_added:  Columns present in new but not in base.
+        columns_deleted: Columns present in base but not in new.
+        union_columns:  All columns — base order first, new-only appended.
+
+    Note: column reorders (same columns, different positions) are silently
+    ignored — values are always compared by name, not position.
+    """
+    base_header_set = set(base_headers)
+    new_header_set = set(new_headers)
+    columns_added = [
+        ColumnEntry(name=col, position=i + 1)
+        for i, col in enumerate(new_headers)
+        if col not in base_header_set
+    ]
+    columns_deleted = [
+        ColumnEntry(name=col, position=i + 1)
+        for i, col in enumerate(base_headers)
+        if col not in new_header_set
+    ]
+    new_only_cols = [col for col in new_headers if col not in base_header_set]
+    union_columns: list[str] = base_headers + new_only_cols
+    return columns_added, columns_deleted, union_columns
+
+
+def _scan_modifications(
+    file_name: str,
+    common_keys: set[tuple],
+    base_index: dict[tuple, tuple[int, str]],
+    new_index: dict[tuple, tuple[int, str]],
+    base_headers: list[str],
+    new_headers: list[str],
+) -> list[tuple[tuple, list[FieldChange], int, int]]:
+    """Scan rows present in both feeds and return those whose field values differ.
+
+    Compares only columns shared between both headers to avoid false positives
+    when a column is added or removed.
+
+    Returns a list of (pk_tuple, field_changes, base_line, new_line) for
+    every common row that has at least one changed field.
+
+    Note: row reorders (same rows, different line positions) are silently
+    ignored — keys are compared as sets, so row order has no effect.
+    """
+    shared_cols = [col for col in base_headers if col in set(new_headers)]
+    candidates: list[tuple[tuple, list[FieldChange], int, int]] = []
+
+    _trace(f"  [{file_name}] scanning {len(common_keys):,} common rows for modifications...")
+    t0 = time.monotonic()
+    for pk_tuple in common_keys:
+        b_line, b_raw = base_index[pk_tuple]
+        n_line, n_raw = new_index[pk_tuple]
+        b_dict = _parse_raw_line(b_raw, base_headers)
+        n_dict = _parse_raw_line(n_raw, new_headers)
+        field_changes = [
+            FieldChange(field=col, base_value=b_dict[col], new_value=n_dict[col])
+            for col in shared_cols
+            if _values_differ(b_dict.get(col, ""), n_dict.get(col, ""))
+        ]
+        if field_changes:
+            candidates.append((pk_tuple, field_changes, b_line, n_line))
+
+    _trace(f"  [{file_name}] scan done in {time.monotonic()-t0:.1f}s — {len(candidates):,} modified")
+    return candidates
+
+
+def _diff_file_modified(
+    file_name: str,
+    base_opener: Callable[[], TextIO],
+    new_opener: Callable[[], TextIO],
+    row_changes_cap: int | None,
+) -> tuple[FileDiff, FileSummary]:
+    """Compute the diff for a file present in both feeds."""
     pk_def = get_primary_key(file_name)
     assert pk_def is not None  # caller guarantees supported files only
 
     # For files with an empty PK definition, use all base columns as the key.
     if len(pk_def) == 0:
         with base_opener() as f:
-            initial_base_headers = _read_headers(f)
-        pk_cols: list[str] = initial_base_headers
+            pk_cols: list[str] = _read_headers(f)
     else:
         pk_cols = pk_def
 
@@ -327,89 +423,35 @@ def _diff_file(
         _trace(f"  [{file_name}] new index done:  {len(new_index):,} rows in {time.monotonic()-t0:.1f}s")
 
     # Column-level diff
-    base_header_set = set(base_headers)
-    new_header_set = set(new_headers)
+    columns_added, columns_deleted, union_columns = _diff_columns(base_headers, new_headers)
 
-    columns_added = [
-        ColumnEntry(name=col, position=i + 1)
-        for i, col in enumerate(new_headers)
-        if col not in base_header_set
-    ]
-    columns_deleted = [
-        ColumnEntry(name=col, position=i + 1)
-        for i, col in enumerate(base_headers)
-        if col not in new_header_set
-    ]
-    # Should a column reorder (same columns, different positions) be reported as a change?
-    # Currently it is silently ignored — values are always compared by column name, not
-    # position. A producer reordering columns without changing any data would produce no
-    # diff at all. Is that the desired behaviour, or should we surface a "columns_reordered"
-    # signal for consumers that care about canonical column ordering?
-
-    # Union columns: base order first, then new-only columns appended.
-    new_only_cols = [col for col in new_headers if col not in base_header_set]
-    union_columns: list[str] = base_headers + new_only_cols
-
-    # ------------------------------------------------------------------
     # Row-level diff
-    # ------------------------------------------------------------------
     base_keys = set(base_index)
     new_keys = set(new_index)
-
     added_keys = new_keys - base_keys
     deleted_keys = base_keys - new_keys
     common_keys = base_keys & new_keys
-    # Should a row reorder (same rows, different line positions) be reported as a change?
-    # Currently it is silently ignored — keys are compared as sets, so row order has no
-    # effect on the diff output. A producer that sorts rows differently without changing
-    # any data would produce no diff at all. Is that the desired behaviour, or should we
-    # surface line-number shifts as a signal for consumers that care about row ordering?
 
-    # For modified-row detection, compare only the *shared* columns to avoid
-    # flagging every row when a column is added to / removed from the file.
-    shared_cols = [col for col in base_headers if col in new_header_set]
-
-    added_rows: list[RowAdded] = []
-    deleted_rows: list[RowDeleted] = []
-    modified_rows: list[RowModified] = []
-
-    # Collect true counts before applying the cap.
     true_added = len(added_keys)
     true_deleted = len(deleted_keys)
 
-    # We count true modified while building; detect first to get true count.
-    modified_candidates: list[tuple[tuple, list[FieldChange], int, int]] = []
-
-    _trace(f"  [{file_name}] scanning {len(common_keys):,} common rows for modifications...")
-    t0 = time.monotonic()
-    for pk_tuple in common_keys:
-        b_line, b_raw = base_index[pk_tuple]
-        n_line, n_raw = new_index[pk_tuple]
-        b_dict = _parse_raw_line(b_raw, base_headers)
-        n_dict = _parse_raw_line(n_raw, new_headers)
-
-        field_changes = [
-            FieldChange(field=col, base_value=b_dict[col], new_value=n_dict[col])
-            for col in shared_cols
-            if _values_differ(b_dict.get(col, ""), n_dict.get(col, ""))
-        ]
-        if field_changes:
-            modified_candidates.append((pk_tuple, field_changes, b_line, n_line))
-
+    modified_candidates = _scan_modifications(
+        file_name, common_keys, base_index, new_index, base_headers, new_headers
+    )
     true_modified = len(modified_candidates)
-    _trace(f"  [{file_name}] scan done in {time.monotonic()-t0:.1f}s — added={true_added:,} deleted={true_deleted:,} modified={true_modified:,}")
+    _trace(f"  [{file_name}] row diff summary — added={true_added:,} deleted={true_deleted:,} modified={true_modified:,}")
 
     # Determine row-changes output based on cap.
     # cap=0 means "summary counts only" — row_changes is omitted from the output
     # entirely (serialized as null, excluded by exclude_none=True in the CLI).
     # True counts are still computed and surfaced in summary.files.
-    include_row_changes: bool
-    if row_changes_cap == 0:
-        include_row_changes = False
-    else:
-        include_row_changes = True
-
+    base_header_set = set(base_headers)
+    new_header_set = set(new_headers)
+    added_rows: list[RowAdded] = []
+    deleted_rows: list[RowDeleted] = []
+    modified_rows: list[RowModified] = []
     truncated: Truncated | None = None
+    include_row_changes = row_changes_cap != 0
 
     if include_row_changes:
         cap = row_changes_cap  # None = unlimited

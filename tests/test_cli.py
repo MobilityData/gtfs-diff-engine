@@ -87,6 +87,42 @@ class TestCapOption:
         assert data["metadata"]["row_changes_cap_per_file"] == 5
 
 
+class TestMissingPrimaryKeyError:
+    def test_exits_nonzero_on_missing_pk_column(self, tmp_path: Path):
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        runner = CliRunner()
+        result = runner.invoke(main, [str(base), str(new)])
+        assert result.exit_code == 1
+
+    def test_error_message_names_file_and_missing_column(self, tmp_path: Path):
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        runner = CliRunner()
+        result = runner.invoke(main, [str(base), str(new)])
+        assert "stops.txt" in result.output
+        assert "stop_id" in result.output
+
+    def test_error_message_includes_headers_found(self, tmp_path: Path):
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        runner = CliRunner()
+        result = runner.invoke(main, [str(base), str(new)])
+        assert "stop_name" in result.output
+
+
 class TestInvalidPath:
     def test_invalid_path_exits_nonzero(self, tmp_path: Path):
         base = tmp_path / "nonexistent_base.zip"

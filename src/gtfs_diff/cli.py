@@ -6,7 +6,7 @@ from pathlib import Path
 
 import click
 
-from gtfs_diff.engine import diff_feeds
+from gtfs_diff.engine import MissingPrimaryKeyError, diff_feeds
 
 
 @click.command()
@@ -52,6 +52,14 @@ def main(
             base_downloaded_at=base_dt,
             new_downloaded_at=new_dt,
         )
+    except MissingPrimaryKeyError as exc:
+        click.echo(
+            f"ERROR: Cannot process '{exc.file_name}' — "
+            f"required primary key column(s) {exc.missing_columns} are missing from the file headers.\n"
+            f"Headers found: {exc.headers}",
+            err=True,
+        )
+        sys.exit(1)
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)

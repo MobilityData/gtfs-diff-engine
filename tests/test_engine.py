@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gtfs_diff.engine import diff_feeds
+from gtfs_diff.engine import MissingPrimaryKeyError, diff_feeds
 from gtfs_diff.models import GtfsDiff
 
 from tests.helpers import write_zip
@@ -400,6 +400,67 @@ class TestCapNone:
         fd = _get_file_diff(result, "stops.txt")
         assert len(fd.row_changes.added) == 5
         assert fd.truncated is None
+
+
+# ---------------------------------------------------------------------------
+# Missing primary key column
+# ---------------------------------------------------------------------------
+
+class TestMissingPrimaryKeyError:
+    def test_missing_pk_column_in_base_raises(self, tmp_path: Path):
+        """diff_feeds raises MissingPrimaryKeyError when the base feed is missing a required PK column."""
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        with pytest.raises(MissingPrimaryKeyError):
+            diff_feeds(base, new)
+
+    def test_missing_pk_column_in_new_raises(self, tmp_path: Path):
+        """diff_feeds raises MissingPrimaryKeyError when the new feed is missing a required PK column."""
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
+        })
+        with pytest.raises(MissingPrimaryKeyError):
+            diff_feeds(base, new)
+
+    def test_exception_carries_file_name(self, tmp_path: Path):
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        with pytest.raises(MissingPrimaryKeyError) as exc_info:
+            diff_feeds(base, new)
+        assert exc_info.value.file_name == "stops.txt"
+
+    def test_exception_carries_missing_columns(self, tmp_path: Path):
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        with pytest.raises(MissingPrimaryKeyError) as exc_info:
+            diff_feeds(base, new)
+        assert "stop_id" in exc_info.value.missing_columns
+
+    def test_exception_carries_headers(self, tmp_path: Path):
+        base = write_zip(tmp_path / "base.zip", {
+            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",
+        })
+        new = write_zip(tmp_path / "new.zip", {
+            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+        })
+        with pytest.raises(MissingPrimaryKeyError) as exc_info:
+            diff_feeds(base, new)
+        assert exc_info.value.headers == ["stop_name", "stop_lat", "stop_lon"]
 
 
 # ---------------------------------------------------------------------------

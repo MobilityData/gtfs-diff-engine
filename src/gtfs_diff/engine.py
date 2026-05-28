@@ -171,7 +171,7 @@ def _values_differ(a: str, b: str) -> bool:
     """
     a = a.strip(),
     b = b.strip()
-    if a == b:
+    if a.lower() == b.lower():
         return False
     try:
         return float(a) != float(b)

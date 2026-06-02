@@ -151,13 +151,13 @@ def _read_csv_index(
         if len(row) < n:
             row = row + [""] * (n - len(row))
         row_vals = row[:n]
-        row_dict = dict(zip(headers, row_vals))
+        row_dict = dict(zip(headers, row_vals, strict=True))
         pk_tuple = tuple(row_dict.get(col, "") for col in effective_pk)
 
         if pk_tuple in index:
             raise ValueError(
                 f"{file_name}: duplicate primary key "
-                f"{dict(zip(effective_pk, pk_tuple))} "
+                f"{dict(zip(effective_pk, pk_tuple, strict=True))} "
                 f"at line {line_num} "
                 f"(first seen at line {index[pk_tuple][0]})."
             )
@@ -176,7 +176,7 @@ def _parse_raw_line(raw_line: str, headers: list[str]) -> dict[str, str]:
         return {col: "" for col in headers}
     if len(row) < len(headers):
         row = row + [""] * (len(headers) - len(row))
-    return dict(zip(headers, row))
+    return dict(zip(headers, row, strict=True))
 
 
 def _values_differ(a: str, b: str) -> bool:

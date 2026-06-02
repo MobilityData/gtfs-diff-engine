@@ -44,9 +44,6 @@ select = [
     "B",   # flake8-bugbear
     "SIM", # flake8-simplify
 ]
-ignore = [
-    "B905", # zip-without-strict — false positives on pre-padded rows
-]
 
 [tool.ruff.format]
 exclude = ["src/gtfs_diff/models.py"]

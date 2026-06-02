@@ -17,6 +17,7 @@ import io
 import sys
 import time
 import zipfile
+from importlib import resources
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -44,9 +45,9 @@ from .models import (
 
 
 def _read_schema_version() -> str:
-    conf_path = Path(__file__).resolve().parent.parent.parent / "schema.conf"
+    conf_text = resources.files("gtfs_diff").joinpath("schema.conf").read_text()
     parser = configparser.ConfigParser()
-    parser.read_string("[default]\n" + conf_path.read_text())
+    parser.read_string("[default]\n" + conf_text)
     return parser.get("default", "SCHEMA_VERSION")
 
 

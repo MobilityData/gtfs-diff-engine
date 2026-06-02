@@ -25,7 +25,7 @@ jobs:
               - 'tests/**'
               - 'pyproject.toml'
             models:
-              - 'schema.conf'
+              - 'src/gtfs_diff/schema.conf'
               - 'scripts/generate_models.sh'
               - 'src/gtfs_diff/models.py'
               - '.github/workflows/ci.yml'

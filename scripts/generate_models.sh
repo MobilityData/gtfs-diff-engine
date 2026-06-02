@@ -2,7 +2,7 @@
 # Generate Pydantic v2 models from the GTFS Diff JSON Schema.
 #
 # Usage:
-#   ./scripts/generate_models.sh                     # use version from schema.conf
+#   ./scripts/generate_models.sh                     # use version from src/gtfs_diff/schema.conf
 #   ./scripts/generate_models.sh v2-rc1              # fetch a specific version from GitHub
 #   ./scripts/generate_models.sh /path/to/local.json # use a local file
 set -euo pipefail
@@ -13,17 +13,18 @@ SCHEMA_REPO="MobilityData/gtfs-diff"
 SCHEMA_BRANCH="main"
 
 # --- Resolve input: argument > schema.conf -----------------------------------
+SCHEMA_CONF="$REPO_ROOT/src/gtfs_diff/schema.conf"
 if [ $# -ge 1 ]; then
   INPUT="$1"
-elif [ -f "$REPO_ROOT/schema.conf" ]; then
-  # shellcheck source=../schema.conf
-  source "$REPO_ROOT/schema.conf"
+elif [ -f "$SCHEMA_CONF" ]; then
+  # shellcheck source=../src/gtfs_diff/schema.conf
+  source "$SCHEMA_CONF"
   INPUT="${SCHEMA_VERSION:?SCHEMA_VERSION not set in schema.conf}"
   echo "Using version from schema.conf: $INPUT"
 else
   echo "Usage: $0 [<version | /path/to/schema.json>]" >&2
   echo "  e.g. $0 v2-rc1" >&2
-  echo "  or set SCHEMA_VERSION in schema.conf" >&2
+  echo "  or set SCHEMA_VERSION in src/gtfs_diff/schema.conf" >&2
   exit 1
 fi
 

@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 
 class UnsupportedFile(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     file_name: str = Field(..., description="File name as it appears in the archive.")
     present_in: Literal["base", "new", "both"] = Field(
         ..., description="Which archive(s) contain this file."
@@ -19,6 +22,9 @@ class UnsupportedFile(BaseModel):
 
 
 class ColumnEntry(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     name: str = Field(..., description="Column name.")
     position: int = Field(
         ..., description="1-based position of this column in the CSV header row.", ge=1
@@ -26,6 +32,9 @@ class ColumnEntry(BaseModel):
 
 
 class FeedSource(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     source: str = Field(..., description="URL or local path to the GTFS archive.")
     downloaded_at: AwareDatetime = Field(
         ..., description="ISO 8601 timestamp of when the feed was downloaded."
@@ -33,6 +42,9 @@ class FeedSource(BaseModel):
 
 
 class FileSummary(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     file_name: str = Field(..., description="Name of the GTFS file.")
     status: Literal["added", "deleted", "modified", "not_compared"] = Field(
         ..., description="File-level status."
@@ -40,6 +52,9 @@ class FileSummary(BaseModel):
 
 
 class Truncated(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     is_truncated: Literal[True] = Field(..., description="Always true when present.")
     omitted_count: int = Field(
         ..., description="Number of row changes omitted due to the cap.", ge=1
@@ -47,6 +62,9 @@ class Truncated(BaseModel):
 
 
 class NotComparedReason(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     code: str = Field(
         ...,
         description='Machine-readable reason code (e.g. "id_churn", "missing_primary_key", "file_too_large").',
@@ -58,11 +76,17 @@ class NotComparedReason(BaseModel):
 
 
 class IgnoredColumn(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     column: str = Field(..., description="The column name that was ignored.")
     reason: NotComparedReason
 
 
 class ColumnStat(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     column: str = Field(..., description="The column name.")
     modifications_count: int = Field(
         ...,
@@ -78,6 +102,9 @@ class ColumnStat(BaseModel):
 
 
 class RowAdded(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     identifier: dict[str, str] = Field(
         ..., description="Primary key values identifying this row."
     )
@@ -91,6 +118,9 @@ class RowAdded(BaseModel):
 
 
 class RowDeleted(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     identifier: dict[str, str] = Field(
         ..., description="Primary key values identifying this row."
     )
@@ -104,12 +134,18 @@ class RowDeleted(BaseModel):
 
 
 class FieldChange(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     field: str = Field(..., description="The column name that changed.")
     base_value: str = Field(..., description="The value in the base feed.")
     new_value: str = Field(..., description="The value in the new feed.")
 
 
 class RowModified(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     identifier: dict[str, str] = Field(
         ..., description="Primary key values identifying this row."
     )
@@ -129,6 +165,9 @@ class RowModified(BaseModel):
 
 
 class Metadata(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     schema_version: str = Field(..., description="The version of the schema.")
     generated_at: AwareDatetime = Field(
         ..., description="ISO 8601 timestamp of when the diff was generated."
@@ -144,6 +183,9 @@ class Metadata(BaseModel):
 
 
 class Summary(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     total_changes: int = Field(
         ..., description="Total number of changes across all files.", ge=0
     )
@@ -161,6 +203,9 @@ class Summary(BaseModel):
 
 
 class RowChanges(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     primary_key: list[str] = Field(
         ..., description="Column(s) that uniquely identify a row.", min_length=1
     )
@@ -174,6 +219,9 @@ class RowChanges(BaseModel):
 
 
 class FileStats(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     total_rows_base: int | None = Field(
         None, description="Total number of rows in the base version of the file.", ge=0
     )
@@ -208,6 +256,9 @@ class FileStats(BaseModel):
 
 
 class FileDiff(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
     file_name: str = Field(..., description="Name of the GTFS file.")
     file_action: Literal["modified", "added", "deleted", "not_compared"] = Field(
         ..., description="Action describing how this file changed."
@@ -235,6 +286,9 @@ class GtfsDiff(BaseModel):
     Schema for GTFS Diff v2 output: a single JSON document describing all differences between two GTFS archives.
     """
 
+    model_config = ConfigDict(
+        extra="allow",
+    )
     metadata: Metadata
     summary: Summary
     file_diffs: list[FileDiff]

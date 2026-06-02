@@ -63,6 +63,7 @@ datamodel-codegen \
   --enum-field-as-literal all \
   --field-constraints \
   --use-schema-description \
+  --extra-fields allow \
   --class-name GtfsDiff \
   --output "$OUTPUT"
 

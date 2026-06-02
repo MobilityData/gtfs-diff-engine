@@ -11,6 +11,7 @@ from gtfs_diff.models import (
     ColumnEntry,
     FieldChange,
     FileDiff,
+    FileStats,
     FileSummary,
     GtfsDiff,
     Metadata,
@@ -67,6 +68,7 @@ def _summary(**kwargs) -> Summary:
         files_added_count=0,
         files_deleted_count=0,
         files_modified_count=0,
+        files_not_compared_count=0,
         files=[],
     )
     defaults.update(kwargs)
@@ -195,23 +197,32 @@ class TestRowModified:
 # ---------------------------------------------------------------------------
 
 class TestFileSummary:
-    def test_all_optional_counts_none(self):
+    def test_valid(self):
         fs = FileSummary(file_name="stops.txt", status="modified")
-        assert fs.rows_added_count is None
-        assert fs.rows_deleted_count is None
-        assert fs.rows_modified_count is None
-        assert fs.columns_added_count is None
-        assert fs.columns_deleted_count is None
+        assert fs.file_name == "stops.txt"
+        assert fs.status == "modified"
+
+    def test_not_compared_status(self):
+        fs = FileSummary(file_name="stops.txt", status="not_compared")
+        assert fs.status == "not_compared"
+
+
+class TestFileStats:
+    def test_all_optional_counts_none(self):
+        stats = FileStats()
+        assert stats.rows_added_count is None
+        assert stats.rows_deleted_count is None
+        assert stats.rows_modified_count is None
+        assert stats.columns_added_count is None
+        assert stats.columns_deleted_count is None
 
     def test_with_counts(self):
-        fs = FileSummary(
-            file_name="stops.txt",
-            status="modified",
+        stats = FileStats(
             rows_added_count=3,
             rows_deleted_count=1,
             rows_modified_count=0,
         )
-        assert fs.rows_added_count == 3
+        assert stats.rows_added_count == 3
 
 
 # ---------------------------------------------------------------------------

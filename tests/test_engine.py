@@ -123,8 +123,8 @@ class TestRowsAdded:
             "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\nS2,Stop Two,3.0,4.0\n",
         })
         result = diff_feeds(base, new)
-        fs = _get_file_summary(result, "stops.txt")
-        assert fs.rows_added_count == 1
+        fd = _get_file_diff(result, "stops.txt")
+        assert fd.stats.rows_added_count == 1
 
     def test_rows_added_identifier(self, tmp_path: Path):
         base = write_zip(tmp_path / "base.zip", {
@@ -148,8 +148,8 @@ class TestRowsDeleted:
             "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
         })
         result = diff_feeds(base, new)
-        fs = _get_file_summary(result, "stops.txt")
-        assert fs.rows_deleted_count == 1
+        fd = _get_file_diff(result, "stops.txt")
+        assert fd.stats.rows_deleted_count == 1
 
     def test_rows_deleted_identifier(self, tmp_path: Path):
         base = write_zip(tmp_path / "base.zip", {
@@ -173,8 +173,8 @@ class TestRowsModified:
             "stops.txt": STOPS_HEADER + "S1,Stop One Renamed,1.0,2.0\n",
         })
         result = diff_feeds(base, new)
-        fs = _get_file_summary(result, "stops.txt")
-        assert fs.rows_modified_count == 1
+        fd = _get_file_diff(result, "stops.txt")
+        assert fd.stats.rows_modified_count == 1
 
     def test_rows_modified_field_changes(self, tmp_path: Path):
         base = write_zip(tmp_path / "base.zip", {

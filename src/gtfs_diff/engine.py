@@ -6,7 +6,7 @@ The two-pass algorithm builds in-memory indexes mapping primary-key tuples to
 (line_number, raw_csv_string) for every row in each file.  For typical transit
 feeds this is fine.  For very large feeds (stop_times.txt can exceed 10 M rows)
 a disk-backed index (e.g. SQLite) would be more appropriate; that is left as a
-future optimisation.
+future optimization.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from .models import (
     FeedSource,
     FieldChange,
     FileDiff,
+    FileStats,
     FileSummary,
     GtfsDiff,
     Metadata,
@@ -71,7 +72,7 @@ LazyOpeners = dict[str, Callable[[], TextIO]]
 # ---------------------------------------------------------------------------
 
 def _row_to_csv(values: list[str]) -> str:
-    """Serialise a list of string values to a single CSV line (no trailing newline)."""
+    """Serialize a list of string values to a single CSV line (no trailing newline)."""
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="")
     writer.writerow(values)
@@ -280,15 +281,9 @@ def _diff_file_added(
         file_action="added",
         columns_added=columns_added,
         columns_deleted=[],
-        row_changes=None,
-        truncated=None,
+        stats=FileStats(columns_added_count=len(columns_added), columns_deleted_count=0),
     )
-    summary = FileSummary(
-        file_name=file_name,
-        status="added",
-        columns_added_count=len(columns_added),
-        columns_deleted_count=0,
-    )
+    summary = FileSummary(file_name=file_name, status="added")
     return file_diff, summary
 
 
@@ -308,15 +303,9 @@ def _diff_file_deleted(
         file_action="deleted",
         columns_added=[],
         columns_deleted=columns_deleted,
-        row_changes=None,
-        truncated=None,
+        stats=FileStats(columns_added_count=0, columns_deleted_count=len(columns_deleted)),
     )
-    summary = FileSummary(
-        file_name=file_name,
-        status="deleted",
-        columns_added_count=0,
-        columns_deleted_count=len(columns_deleted),
-    )
+    summary = FileSummary(file_name=file_name, status="deleted")
     return file_diff, summary
 
 
@@ -522,16 +511,17 @@ def _diff_file_modified(
         columns_deleted=columns_deleted,
         row_changes=row_changes,
         truncated=truncated,
+        stats=FileStats(
+            total_rows_base=len(base_index),
+            total_rows_new=len(new_index),
+            columns_added_count=len(columns_added),
+            columns_deleted_count=len(columns_deleted),
+            rows_added_count=true_added,
+            rows_deleted_count=true_deleted,
+            rows_modified_count=true_modified,
+        ),
     )
-    summary = FileSummary(
-        file_name=file_name,
-        status="modified",
-        columns_added_count=len(columns_added),
-        columns_deleted_count=len(columns_deleted),
-        rows_added_count=true_added,
-        rows_deleted_count=true_deleted,
-        rows_modified_count=true_modified,
-    )
+    summary = FileSummary(file_name=file_name, status="modified")
     return file_diff, summary
 
 
@@ -607,13 +597,15 @@ def diff_feeds(
 
             # Per spec: file_diffs[] contains only *changed* files.
             # Skip files present in both feeds with no actual changes.
+            stats = file_diff.stats
             if (
                 file_summary.status == "modified"
-                and not file_summary.columns_added_count
-                and not file_summary.columns_deleted_count
-                and not file_summary.rows_added_count
-                and not file_summary.rows_deleted_count
-                and not file_summary.rows_modified_count
+                and stats is not None
+                and not stats.columns_added_count
+                and not stats.columns_deleted_count
+                and not stats.rows_added_count
+                and not stats.rows_deleted_count
+                and not stats.rows_modified_count
             ):
                 continue
 
@@ -625,12 +617,15 @@ def diff_feeds(
     files_deleted = sum(1 for s in file_summaries if s.status == "deleted")
     files_modified = sum(1 for s in file_summaries if s.status == "modified")
 
+    def _stat(attr: str) -> int:
+        return sum(getattr(fd.stats, attr, 0) or 0 for fd in file_diffs if fd.stats)
+
     total_changes = (
-        sum(s.rows_added_count or 0 for s in file_summaries)
-        + sum(s.rows_deleted_count or 0 for s in file_summaries)
-        + sum(s.rows_modified_count or 0 for s in file_summaries)
-        + sum(s.columns_added_count or 0 for s in file_summaries)
-        + sum(s.columns_deleted_count or 0 for s in file_summaries)
+        _stat("rows_added_count")
+        + _stat("rows_deleted_count")
+        + _stat("rows_modified_count")
+        + _stat("columns_added_count")
+        + _stat("columns_deleted_count")
         + files_added
         + files_deleted
     )
@@ -648,6 +643,7 @@ def diff_feeds(
         files_added_count=files_added,
         files_deleted_count=files_deleted,
         files_modified_count=files_modified,
+        files_not_compared_count=0,
         files=file_summaries,
     )
     result = GtfsDiff(metadata=metadata, summary=summary, file_diffs=file_diffs)

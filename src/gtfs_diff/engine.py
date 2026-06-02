@@ -169,7 +169,7 @@ def _values_differ(a: str, b: str) -> bool:
     (e.g. '-73.55625' vs '-73.556250').
     Non-numeric strings fall back to string equality.
     """
-    a = a.strip(),
+    a = a.strip()
     b = b.strip()
     if a.lower() == b.lower():
         return False

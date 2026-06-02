@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# compare_feeds.sh — Download two GTFS feeds by URL and diff them.
+# compare_feeds.sh — Compare two GTFS feeds and produce a structured JSON diff.
+#
+# Each feed can be supplied as:
+#   • A remote URL   (https://…)  — downloaded to a temp directory
+#   • A local zip    (/path/to/feed.zip)
+#   • A local folder (/path/to/gtfs-dir/)
 #
 # Usage:
-#   ./scripts/compare_feeds.sh <BASE_URL> <NEW_URL> [OPTIONS]
+#   ./scripts/compare_feeds.sh <BASE_FEED> <NEW_FEED> [OPTIONS]
 #
 # Arguments:
-#   BASE_URL   URL of the base (old) GTFS zip feed
-#   NEW_URL    URL of the new GTFS zip feed
+#   BASE_FEED   Base (old) GTFS feed — URL, local zip, or local folder
+#   NEW_FEED    New GTFS feed        — URL, local zip, or local folder
 #
 # Options:
 #   -o, --output FILE    Write JSON diff to FILE (default: stdout)
@@ -15,14 +20,22 @@
 #   -h, --help           Show this help message
 #
 # Examples:
+#   # Two remote URLs
 #   ./scripts/compare_feeds.sh \
 #       https://example.com/gtfs-jan.zip \
 #       https://example.com/gtfs-feb.zip
 #
+#   # Mix of local zip and remote URL
 #   ./scripts/compare_feeds.sh \
-#       https://example.com/gtfs-jan.zip \
+#       /data/gtfs-jan.zip \
 #       https://example.com/gtfs-feb.zip \
 #       --output diff.json --cap 1000
+#
+#   # Two local folders
+#   ./scripts/compare_feeds.sh \
+#       /data/gtfs-jan/ \
+#       /data/gtfs-feb/ \
+#       --output diff.json
 
 set -euo pipefail
 
@@ -41,12 +54,44 @@ require_cmd() {
     command -v "$1" &>/dev/null || die "'$1' is required but not installed."
 }
 
+is_url() { [[ "$1" == http://* || "$1" == https://* ]]; }
+
+# resolve_feed <label> <input> <dest_zip>
+#   Resolves a feed input to a path gtfs-diff can consume:
+#     - URL       → downloaded to <dest_zip>; prints the dest_zip path
+#     - local zip → validated and echoed as-is
+#     - local dir → validated and echoed as-is
+resolve_feed() {
+    local label="$1" input="$2" dest_zip="$3"
+
+    if is_url "$input"; then
+        require_cmd curl
+        echo "⬇  Downloading $label feed..." >&2
+        curl -fsSL --retry 3 --retry-delay 2 -o "$dest_zip" "$input" \
+            || die "Failed to download $label feed: $input"
+        file -b "$dest_zip" | grep -qi "zip" \
+            || die "$label feed URL did not return a valid zip: $input"
+        echo "✔  $label feed downloaded." >&2
+        echo "$dest_zip"
+    elif [[ -f "$input" ]]; then
+        [[ "$input" == *.zip ]] \
+            || die "$label feed file does not have a .zip extension: $input"
+        file -b "$input" | grep -qi "zip" \
+            || die "$label feed does not appear to be a valid zip: $input"
+        echo "$input"
+    elif [[ -d "$input" ]]; then
+        echo "$input"
+    else
+        die "$label feed not found (not a URL, zip file, or directory): $input"
+    fi
+}
+
 # --------------------------------------------------------------------------- #
 # Argument parsing
 # --------------------------------------------------------------------------- #
 
-BASE_URL=""
-NEW_URL=""
+BASE_FEED=""
+NEW_FEED=""
 OUTPUT_FILE=""
 CAP=""
 PRETTY="--pretty"
@@ -59,22 +104,21 @@ while [[ $# -gt 0 ]]; do
         --no-pretty) PRETTY="--no-pretty"; shift ;;
         -*)          die "Unknown option: $1" ;;
         *)
-            if   [[ -z "$BASE_URL" ]]; then BASE_URL="$1"
-            elif [[ -z "$NEW_URL"  ]]; then NEW_URL="$1"
+            if   [[ -z "$BASE_FEED" ]]; then BASE_FEED="$1"
+            elif [[ -z "$NEW_FEED"  ]]; then NEW_FEED="$1"
             else die "Unexpected argument: $1"
             fi
             shift ;;
     esac
 done
 
-[[ -n "$BASE_URL" ]] || die "BASE_URL is required.\nRun with --help for usage."
-[[ -n "$NEW_URL"  ]] || die "NEW_URL is required.\nRun with --help for usage."
+[[ -n "$BASE_FEED" ]] || die "BASE_FEED is required.\nRun with --help for usage."
+[[ -n "$NEW_FEED"  ]] || die "NEW_FEED is required.\nRun with --help for usage."
 
 # --------------------------------------------------------------------------- #
 # Dependency checks
 # --------------------------------------------------------------------------- #
 
-require_cmd curl
 require_cmd gtfs-diff
 
 # --------------------------------------------------------------------------- #
@@ -84,32 +128,18 @@ require_cmd gtfs-diff
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-BASE_ZIP="$WORK_DIR/base.zip"
-NEW_ZIP="$WORK_DIR/new.zip"
-
 # --------------------------------------------------------------------------- #
-# Download feeds
+# Resolve feeds
 # --------------------------------------------------------------------------- #
 
-echo "⬇  Downloading base feed..." >&2
-curl -fsSL --retry 3 --retry-delay 2 -o "$BASE_ZIP" "$BASE_URL" \
-    || die "Failed to download base feed: $BASE_URL"
-
-echo "⬇  Downloading new feed..." >&2
-curl -fsSL --retry 3 --retry-delay 2 -o "$NEW_ZIP" "$NEW_URL" \
-    || die "Failed to download new feed: $NEW_URL"
-
-# Basic sanity check — both must look like zip files
-file "$BASE_ZIP" | grep -qi "zip" || die "Base feed does not appear to be a valid zip: $BASE_URL"
-file "$NEW_ZIP"  | grep -qi "zip" || die "New feed does not appear to be a valid zip: $NEW_URL"
-
-echo "✔  Both feeds downloaded." >&2
+BASE_PATH="$(resolve_feed "base" "$BASE_FEED" "$WORK_DIR/base.zip")"
+NEW_PATH="$(resolve_feed "new"  "$NEW_FEED"  "$WORK_DIR/new.zip")"
 
 # --------------------------------------------------------------------------- #
 # Build gtfs-diff command
 # --------------------------------------------------------------------------- #
 
-CMD=(gtfs-diff "$BASE_ZIP" "$NEW_ZIP" "$PRETTY")
+CMD=(gtfs-diff "$BASE_PATH" "$NEW_PATH" "$PRETTY")
 
 [[ -n "$CAP"         ]] && CMD+=(--cap "$CAP")
 [[ -n "$OUTPUT_FILE" ]] && CMD+=(--output "$OUTPUT_FILE")

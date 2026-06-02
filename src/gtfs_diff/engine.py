@@ -17,10 +17,10 @@ import io
 import sys
 import time
 import zipfile
-from importlib import resources
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from importlib import resources
 from pathlib import Path
 from typing import TextIO
 

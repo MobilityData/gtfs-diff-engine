@@ -6,7 +6,8 @@ on:
   pull_request:
 
 jobs:
-  changes:
+  detect-changes:
+    name: Detect changed paths
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
@@ -30,8 +31,11 @@ jobs:
               - '.github/workflows/ci.yml'
 
   test:
-    needs: changes
-    if: needs.changes.outputs.src == 'true'
+    needs:
+      - detect-changes
+      - lint
+    name: Run tests on Python ${{ matrix.python-version }}
+    if: needs.detect-changes.outputs.src == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -44,9 +48,23 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: pytest --tb=short
 
+  lint:
+    needs: detect-changes
+    name: Lint and format check
+    if: needs.detect-changes.outputs.src == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: ./scripts/lint.sh
+
   models-freshness:
-    needs: changes
-    if: needs.changes.outputs.models == 'true'
+    needs: detect-changes
+    name: Check models.py is up to date
+    if: needs.detect-changes.outputs.models == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

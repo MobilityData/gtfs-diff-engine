@@ -11,15 +11,17 @@ future optimization.
 
 from __future__ import annotations
 
+import configparser
 import csv
 import io
 import sys
 import time
 import zipfile
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Generator, TextIO
+from typing import TextIO
 
 from .gtfs_definitions import get_primary_key
 from .models import (
@@ -40,27 +42,40 @@ from .models import (
     UnsupportedFile,
 )
 
-SCHEMA_VERSION = "2.0"
+
+def _read_schema_version() -> str:
+    conf_path = Path(__file__).resolve().parent.parent.parent / "schema.conf"
+    parser = configparser.ConfigParser()
+    parser.read_string("[default]\n" + conf_path.read_text())
+    return parser.get("default", "SCHEMA_VERSION")
 
 
 class MissingPrimaryKeyError(ValueError):
     """Raised when a required primary key column is absent from a file's headers."""
 
-    def __init__(self, file_name: str, missing_columns: list[str], headers: list[str]) -> None:
+    def __init__(
+        self, file_name: str, missing_columns: list[str], headers: list[str]
+    ) -> None:
         self.file_name = file_name
         self.missing_columns = missing_columns
         self.headers = headers
         super().__init__(
-            f"'{file_name}': required primary key column(s) {missing_columns} "
-            f"not found in headers {headers}."
+            f"'{file_name}': required primary key column(s) "
+            f"{missing_columns} not found in headers {headers}."
         )
 
 
 def _trace(msg: str) -> None:
     """Print a timestamped progress message with current RSS to stderr."""
     import psutil
+
     rss_mb = psutil.Process().memory_info().rss / 1024 / 1024
-    print(f"[gtfs-diff {datetime.now().strftime('%H:%M:%S')} {rss_mb:.0f}MB] {msg}", file=sys.stderr, flush=True)
+    print(
+        f"[gtfs-diff {datetime.now().strftime('%H:%M:%S')} {rss_mb:.0f}MB] {msg}",
+        file=sys.stderr,
+        flush=True,
+    )
+
 
 # A "lazy opener" maps a filename (e.g. "stops.txt") to a zero-arg callable
 # that opens the file and returns a text stream.
@@ -70,6 +85,7 @@ LazyOpeners = dict[str, Callable[[], TextIO]]
 # ---------------------------------------------------------------------------
 # Low-level CSV helpers
 # ---------------------------------------------------------------------------
+
 
 def _row_to_csv(values: list[str]) -> str:
     """Serialize a list of string values to a single CSV line (no trailing newline)."""
@@ -140,8 +156,10 @@ def _read_csv_index(
 
         if pk_tuple in index:
             raise ValueError(
-                f"{file_name}: duplicate primary key {dict(zip(effective_pk, pk_tuple))} "
-                f"at line {line_num} (first seen at line {index[pk_tuple][0]})."
+                f"{file_name}: duplicate primary key "
+                f"{dict(zip(effective_pk, pk_tuple))} "
+                f"at line {line_num} "
+                f"(first seen at line {index[pk_tuple][0]})."
             )
 
         index[pk_tuple] = (line_num, _row_to_csv(row_vals))
@@ -198,6 +216,7 @@ def _compute_raw_value(
 # Feed opener
 # ---------------------------------------------------------------------------
 
+
 @contextmanager
 def _open_feed(path: str | Path) -> Generator[LazyOpeners, None, None]:
     """Open a GTFS feed (zip archive or directory) and yield lazy file openers.
@@ -215,8 +234,10 @@ def _open_feed(path: str | Path) -> Generator[LazyOpeners, None, None]:
     if path.is_dir():
         openers: LazyOpeners = {}
         for txt_file in sorted(path.glob("*.txt")):
+
             def _make_opener(p: Path) -> Callable[[], TextIO]:
                 return lambda: p.open(encoding="utf-8-sig")
+
             openers[txt_file.name] = _make_opener(txt_file)
         yield openers
 
@@ -233,8 +254,10 @@ def _open_feed(path: str | Path) -> Generator[LazyOpeners, None, None]:
 
             openers = {}
             for basename, internal_path in name_map.items():
+
                 def _make_opener(ip: str) -> Callable[[], TextIO]:  # type: ignore[misc]
                     return lambda: io.TextIOWrapper(zf.open(ip), encoding="utf-8-sig")
+
                 openers[basename] = _make_opener(internal_path)
             yield openers
         finally:
@@ -249,6 +272,7 @@ def _open_feed(path: str | Path) -> Generator[LazyOpeners, None, None]:
 # ---------------------------------------------------------------------------
 # Per-file diff
 # ---------------------------------------------------------------------------
+
 
 def _diff_file(
     file_name: str,
@@ -273,15 +297,16 @@ def _diff_file_added(
     with new_opener() as f:
         new_headers = _read_headers(f)
     columns_added = [
-        ColumnEntry(name=col, position=i + 1)
-        for i, col in enumerate(new_headers)
+        ColumnEntry(name=col, position=i + 1) for i, col in enumerate(new_headers)
     ]
     file_diff = FileDiff(
         file_name=file_name,
         file_action="added",
         columns_added=columns_added,
         columns_deleted=[],
-        stats=FileStats(columns_added_count=len(columns_added), columns_deleted_count=0),
+        stats=FileStats(
+            columns_added_count=len(columns_added), columns_deleted_count=0
+        ),
     )
     summary = FileSummary(file_name=file_name, status="added")
     return file_diff, summary
@@ -295,15 +320,16 @@ def _diff_file_deleted(
     with base_opener() as f:
         base_headers = _read_headers(f)
     columns_deleted = [
-        ColumnEntry(name=col, position=i + 1)
-        for i, col in enumerate(base_headers)
+        ColumnEntry(name=col, position=i + 1) for i, col in enumerate(base_headers)
     ]
     file_diff = FileDiff(
         file_name=file_name,
         file_action="deleted",
         columns_added=[],
         columns_deleted=columns_deleted,
-        stats=FileStats(columns_added_count=0, columns_deleted_count=len(columns_deleted)),
+        stats=FileStats(
+            columns_added_count=0, columns_deleted_count=len(columns_deleted)
+        ),
     )
     summary = FileSummary(file_name=file_name, status="deleted")
     return file_diff, summary
@@ -362,7 +388,8 @@ def _scan_modifications(
     shared_cols = [col for col in base_headers if col in set(new_headers)]
     candidates: list[tuple[tuple, list[FieldChange], int, int]] = []
 
-    _trace(f"  [{file_name}] scanning {len(common_keys):,} common rows for modifications...")
+    n = len(common_keys)
+    _trace(f"  [{file_name}] scanning {n:,} common rows...")
     t0 = time.monotonic()
     for pk_tuple in common_keys:
         b_line, b_raw = base_index[pk_tuple]
@@ -377,7 +404,10 @@ def _scan_modifications(
         if field_changes:
             candidates.append((pk_tuple, field_changes, b_line, n_line))
 
-    _trace(f"  [{file_name}] scan done in {time.monotonic()-t0:.1f}s — {len(candidates):,} modified")
+    _trace(
+        f"  [{file_name}] scan done in {time.monotonic() - t0:.1f}s — "
+        f"{len(candidates):,} modified"
+    )
     return candidates
 
 
@@ -403,16 +433,24 @@ def _diff_file_modified(
         _trace(f"  [{file_name}] indexing base feed...")
         t0 = time.monotonic()
         base_headers, base_index = _read_csv_index(f, pk_cols, file_name=file_name)
-        _trace(f"  [{file_name}] base index done: {len(base_index):,} rows in {time.monotonic()-t0:.1f}s")
+        _trace(
+            f"  [{file_name}] base index done: {len(base_index):,} "
+            f"rows in {time.monotonic() - t0:.1f}s"
+        )
 
     with new_opener() as f:
         _trace(f"  [{file_name}] indexing new feed...")
         t0 = time.monotonic()
         new_headers, new_index = _read_csv_index(f, pk_cols, file_name=file_name)
-        _trace(f"  [{file_name}] new index done:  {len(new_index):,} rows in {time.monotonic()-t0:.1f}s")
+        _trace(
+            f"  [{file_name}] new index done:  {len(new_index):,} "
+            f"rows in {time.monotonic() - t0:.1f}s"
+        )
 
     # Column-level diff
-    columns_added, columns_deleted, union_columns = _diff_columns(base_headers, new_headers)
+    columns_added, columns_deleted, union_columns = _diff_columns(
+        base_headers, new_headers
+    )
 
     # Row-level diff
     base_keys = set(base_index)
@@ -428,7 +466,12 @@ def _diff_file_modified(
         file_name, common_keys, base_index, new_index, base_headers, new_headers
     )
     true_modified = len(modified_candidates)
-    _trace(f"  [{file_name}] row diff summary — added={true_added:,} deleted={true_deleted:,} modified={true_modified:,}")
+    _trace(
+        f"  [{file_name}] row diff summary — "
+        f"added={true_added:,} "
+        f"deleted={true_deleted:,} "
+        f"modified={true_modified:,}"
+    )
 
     # Determine row-changes output based on cap.
     # cap=0 means "summary counts only" — row_changes is omitted from the output
@@ -456,7 +499,9 @@ def _diff_file_modified(
             identifier = {col: n_dict.get(col, "") for col in pk_cols}
             raw_value = _compute_raw_value(n_dict, union_columns, new_header_set)
             added_rows.append(
-                RowAdded(identifier=identifier, raw_value=raw_value, new_line_number=n_line)
+                RowAdded(
+                    identifier=identifier, raw_value=raw_value, new_line_number=n_line
+                )
             )
 
         # Fill deleted rows up to remaining cap.
@@ -467,12 +512,16 @@ def _diff_file_modified(
             identifier = {col: b_dict.get(col, "") for col in pk_cols}
             raw_value = _compute_raw_value(b_dict, union_columns, base_header_set)
             deleted_rows.append(
-                RowDeleted(identifier=identifier, raw_value=raw_value, base_line_number=b_line)
+                RowDeleted(
+                    identifier=identifier, raw_value=raw_value, base_line_number=b_line
+                )
             )
 
         # Fill modified rows up to remaining cap.
         modified_limit = _remaining(len(added_rows) + len(deleted_rows))
-        for pk_tuple, field_changes, b_line, n_line in modified_candidates[:modified_limit]:
+        for pk_tuple, field_changes, b_line, n_line in modified_candidates[
+            :modified_limit
+        ]:
             n_raw = new_index[pk_tuple][1]
             n_dict = _parse_raw_line(n_raw, new_headers)
             identifier = {col: n_dict.get(col, "") for col in pk_cols}
@@ -490,7 +539,9 @@ def _diff_file_modified(
         total_included = len(added_rows) + len(deleted_rows) + len(modified_rows)
         total_true = true_added + true_deleted + true_modified
         if cap is not None and total_true > cap:
-            truncated = Truncated(is_truncated=True, omitted_count=total_true - total_included)
+            truncated = Truncated(
+                is_truncated=True, omitted_count=total_true - total_included
+            )
 
     row_changes: RowChanges | None = None
     if include_row_changes:
@@ -529,6 +580,7 @@ def _diff_file_modified(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def diff_feeds(
     base_path: str | Path,
     new_path: str | Path,
@@ -543,7 +595,8 @@ def diff_feeds(
         new_path:                Path to the new GTFS feed — zip or directory.
         row_changes_cap_per_file:
             * ``None``  — include all row changes (default).
-            * ``0``     — omit all row-level detail (column diffs and counts still computed).
+            * ``0``     — omit all row-level detail (column diffs and counts
+                          still computed).
             * ``N > 0`` — include up to *N* row changes per file (added first, then
                           deleted, then modified); a :class:`Truncated` record is
                           attached when the true count exceeds *N*.
@@ -631,7 +684,7 @@ def diff_feeds(
     )
 
     metadata = Metadata(
-        schema_version=SCHEMA_VERSION,
+        schema_version=_read_schema_version(),
         generated_at=now,
         row_changes_cap_per_file=row_changes_cap_per_file,
         base_feed=FeedSource(source=str(base_path), downloaded_at=base_downloaded_at),

@@ -9,16 +9,14 @@ from pydantic import ValidationError
 
 from gtfs_diff.models import (
     ColumnEntry,
+    FeedSource,
     FieldChange,
     FileDiff,
     FileStats,
     FileSummary,
     GtfsDiff,
     Metadata,
-    FeedSource,
-    RowAdded,
     RowChanges,
-    RowDeleted,
     RowModified,
     Summary,
     Truncated,
@@ -31,6 +29,7 @@ NOW = datetime(2024, 1, 1, tzinfo=timezone.utc)
 # ---------------------------------------------------------------------------
 # Helpers to build valid model instances
 # ---------------------------------------------------------------------------
+
 
 def _feed_source(url: str = "http://example.com/feed.zip") -> FeedSource:
     return FeedSource(source=url, downloaded_at=NOW)
@@ -89,6 +88,7 @@ def _gtfs_diff(**kwargs) -> GtfsDiff:
 # GtfsDiff round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestGtfsDiffRoundTrip:
     def test_round_trip_empty(self):
         obj = _gtfs_diff()
@@ -119,6 +119,7 @@ class TestGtfsDiffRoundTrip:
 # ColumnEntry
 # ---------------------------------------------------------------------------
 
+
 class TestColumnEntry:
     def test_valid(self):
         col = ColumnEntry(name="stop_id", position=1)
@@ -141,6 +142,7 @@ class TestColumnEntry:
 # ---------------------------------------------------------------------------
 # RowChanges
 # ---------------------------------------------------------------------------
+
 
 class TestRowChanges:
     def test_valid(self):
@@ -167,6 +169,7 @@ class TestRowChanges:
 # ---------------------------------------------------------------------------
 # RowModified
 # ---------------------------------------------------------------------------
+
 
 class TestRowModified:
     def test_valid(self):
@@ -195,6 +198,7 @@ class TestRowModified:
 # ---------------------------------------------------------------------------
 # FileSummary
 # ---------------------------------------------------------------------------
+
 
 class TestFileSummary:
     def test_valid(self):
@@ -229,6 +233,7 @@ class TestFileStats:
 # Truncated
 # ---------------------------------------------------------------------------
 
+
 class TestTruncated:
     def test_valid(self):
         t = Truncated(is_truncated=True, omitted_count=5)
@@ -247,6 +252,7 @@ class TestTruncated:
 # ---------------------------------------------------------------------------
 # UnsupportedFile
 # ---------------------------------------------------------------------------
+
 
 class TestUnsupportedFile:
     @pytest.mark.parametrize("present_in", ["base", "new", "both"])

@@ -65,9 +65,17 @@ datamodel-codegen \
   --class-name GtfsDiff \
   --output "$OUTPUT"
 
-# --- Post-process: clean header, append __all__ ------------------------------
-# Remove the timestamp and temp filename so re-generation doesn't create noisy diffs.
-sed -i.bak '/^#   timestamp:/d; /^#   filename:/d' "$OUTPUT" && rm -f "$OUTPUT.bak"
+# --- Post-process: replace header, append __all__ ----------------------------
+# Replace the codegen header with a clear auto-generated notice.
+{
+  echo "# AUTO-GENERATED — DO NOT EDIT"
+  echo "# This file is generated from the GTFS Diff JSON Schema."
+  echo "# To regenerate: ./scripts/generate_models.sh"
+  echo "# Schema source: https://github.com/$SCHEMA_REPO"
+  echo ""
+  # Strip the original codegen comment block (everything before the first blank line).
+  sed -n '/^$/,$p' "$OUTPUT"
+} > "$OUTPUT.tmp" && mv "$OUTPUT.tmp" "$OUTPUT"
 
 # Collect class names and append __all__.
 CLASSES=$(grep -oE '^class ([A-Za-z_][A-Za-z0-9_]*)' "$OUTPUT" | awk '{print $2}')

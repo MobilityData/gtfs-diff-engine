@@ -13,16 +13,33 @@ from gtfs_diff.engine import MissingPrimaryKeyError, diff_feeds
 @click.version_option(version="0.1.0", prog_name="gtfs-diff-engine")
 @click.argument("base_feed", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_feed", type=click.Path(exists=True, path_type=Path))
-@click.option("--output", "-o", type=click.Path(path_type=Path), default=None,
-              help="Write JSON output to FILE instead of stdout.")
-@click.option("--cap", "-c", type=int, default=None,
-              help="Max row changes per file (0 = omit row-level detail).")
-@click.option("--pretty/--no-pretty", default=True,
-              help="Pretty-print JSON (default: --pretty).")
-@click.option("--base-downloaded-at", default=None,
-              help="ISO 8601 datetime for when base was downloaded.")
-@click.option("--new-downloaded-at", default=None,
-              help="ISO 8601 datetime for when new was downloaded.")
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write JSON output to FILE instead of stdout.",
+)
+@click.option(
+    "--cap",
+    "-c",
+    type=int,
+    default=None,
+    help="Max row changes per file (0 = omit row-level detail).",
+)
+@click.option(
+    "--pretty/--no-pretty", default=True, help="Pretty-print JSON (default: --pretty)."
+)
+@click.option(
+    "--base-downloaded-at",
+    default=None,
+    help="ISO 8601 datetime for when base was downloaded.",
+)
+@click.option(
+    "--new-downloaded-at",
+    default=None,
+    help="ISO 8601 datetime for when new was downloaded.",
+)
 def main(
     base_feed: Path,
     new_feed: Path,
@@ -38,8 +55,12 @@ def main(
     NEW_FEED:  path to the new GTFS feed (zip or directory)
     """
     try:
-        base_dt = datetime.fromisoformat(base_downloaded_at) if base_downloaded_at else None
-        new_dt = datetime.fromisoformat(new_downloaded_at) if new_downloaded_at else None
+        base_dt = (
+            datetime.fromisoformat(base_downloaded_at) if base_downloaded_at else None
+        )
+        new_dt = (
+            datetime.fromisoformat(new_downloaded_at) if new_downloaded_at else None
+        )
     except ValueError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
@@ -55,7 +76,8 @@ def main(
     except MissingPrimaryKeyError as exc:
         click.echo(
             f"ERROR: Cannot process '{exc.file_name}' — "
-            f"required primary key column(s) {exc.missing_columns} are missing from the file headers.\n"
+            f"required primary key column(s) {exc.missing_columns} "
+            f"are missing from the file headers.\n"
             f"Headers found: {exc.headers}",
             err=True,
         )
@@ -64,7 +86,10 @@ def main(
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
-    json_str = result.model_dump_json(indent=2, exclude_none=True) if pretty else result.model_dump_json(exclude_none=True)
+    if pretty:
+        json_str = result.model_dump_json(indent=2, exclude_none=True)
+    else:
+        json_str = result.model_dump_json(exclude_none=True)
 
     if output is not None:
         try:

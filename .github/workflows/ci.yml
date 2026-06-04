@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  detect-changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+      models: ${{ steps.filter.outputs.models }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            src:
+              - 'src/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+            models:
+              - 'src/gtfs_diff/schema.conf'
+              - 'scripts/generate_models.sh'
+              - 'src/gtfs_diff/models.py'
+              - '.github/workflows/ci.yml'
+
+  test:
+    needs:
+      - detect-changes
+      - lint
+    name: Run tests on Python ${{ matrix.python-version }}
+    if: needs.detect-changes.outputs.src == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: pytest --tb=short
+
+  lint:
+    needs: detect-changes
+    name: Lint and format check
+    if: needs.detect-changes.outputs.src == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: ./scripts/lint.sh
+
+  models-freshness:
+    needs: detect-changes
+    name: Check models.py is up to date
+    if: needs.detect-changes.outputs.models == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install 'datamodel-code-generator[ruff]>=0.59'
+      - run: ./scripts/generate_models.sh
+      - name: Check models.py is up to date
+        run: |
+          if ! git diff --exit-code src/gtfs_diff/models.py; then
+            echo "::error::src/gtfs_diff/models.py is out of date with the schema. Run ./scripts/generate_models.sh to regenerate."
+            exit 1
+          fi

@@ -5,11 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 from gtfs_diff.cli import main
-
 from tests.helpers import write_zip
 
 STOPS_HEADER = "stop_id,stop_name,stop_lat,stop_lon\n"
@@ -89,35 +87,56 @@ class TestCapOption:
 
 class TestMissingPrimaryKeyError:
     def test_exits_nonzero_on_missing_pk_column(self, tmp_path: Path):
-        base = write_zip(tmp_path / "base.zip", {
-            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
-        })
-        new = write_zip(tmp_path / "new.zip", {
-            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
-        })
+        base = write_zip(
+            tmp_path / "base.zip",
+            {
+                "stops.txt": "stop_name,stop_lat,stop_lon\n"
+                "Stop One,1.0,2.0\n",  # stop_id absent
+            },
+        )
+        new = write_zip(
+            tmp_path / "new.zip",
+            {
+                "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+            },
+        )
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new)])
         assert result.exit_code == 1
 
     def test_error_message_names_file_and_missing_column(self, tmp_path: Path):
-        base = write_zip(tmp_path / "base.zip", {
-            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
-        })
-        new = write_zip(tmp_path / "new.zip", {
-            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
-        })
+        base = write_zip(
+            tmp_path / "base.zip",
+            {
+                "stops.txt": "stop_name,stop_lat,stop_lon\n"
+                "Stop One,1.0,2.0\n",  # stop_id absent
+            },
+        )
+        new = write_zip(
+            tmp_path / "new.zip",
+            {
+                "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+            },
+        )
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new)])
         assert "stops.txt" in result.output
         assert "stop_id" in result.output
 
     def test_error_message_includes_headers_found(self, tmp_path: Path):
-        base = write_zip(tmp_path / "base.zip", {
-            "stops.txt": "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\n",  # stop_id absent
-        })
-        new = write_zip(tmp_path / "new.zip", {
-            "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
-        })
+        base = write_zip(
+            tmp_path / "base.zip",
+            {
+                "stops.txt": "stop_name,stop_lat,stop_lon\n"
+                "Stop One,1.0,2.0\n",  # stop_id absent
+            },
+        )
+        new = write_zip(
+            tmp_path / "new.zip",
+            {
+                "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+            },
+        )
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new)])
         assert "stop_name" in result.output

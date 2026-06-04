@@ -523,10 +523,10 @@ def _diff_file_modified(
         for pk_tuple, field_changes, b_line, n_line in modified_candidates[
             :modified_limit
         ]:
-            n_raw = new_index[pk_tuple][1]
-            n_dict = _parse_raw_line(n_raw, new_headers)
-            identifier = {col: n_dict.get(col, "") for col in pk_cols}
-            raw_value = _compute_raw_value(n_dict, union_columns, new_header_set)
+            b_raw = base_index[pk_tuple][1]
+            b_dict = _parse_raw_line(b_raw, base_headers)
+            identifier = {col: b_dict.get(col, "") for col in pk_cols}
+            raw_value = _compute_raw_value(b_dict, union_columns, base_header_set)
             modified_rows.append(
                 RowModified(
                     identifier=identifier,

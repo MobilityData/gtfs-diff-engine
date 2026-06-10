@@ -85,9 +85,7 @@ def _missing_required_pk_columns(
     header_set = set(headers)
     optional_pk = get_optional_primary_key_columns(file_name)
     return [
-        col
-        for col in pk_columns
-        if col not in header_set and col not in optional_pk
+        col for col in pk_columns if col not in header_set and col not in optional_pk
     ]
 
 
@@ -131,9 +129,7 @@ def _read_csv_index(
         # record_sub_id / field_value) may be absent, but they still participate
         # in the compare identity as NULL/empty values. Only a *mandatory*
         # missing column is an error.
-        missing_required = _missing_required_pk_columns(
-            headers, pk_columns, file_name
-        )
+        missing_required = _missing_required_pk_columns(headers, pk_columns, file_name)
         if missing_required:
             raise MissingPrimaryKeyError(file_name, missing_required, headers)
         effective_pk = pk_columns

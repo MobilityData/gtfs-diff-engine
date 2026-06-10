@@ -1406,7 +1406,9 @@ class TestExpandedOptionalPrimaryKeys:
     def test_agency_without_agency_id_is_null_padded_not_raised(self):
         # A single-agency feed may omit agency_id; it must not raise and the lone
         # row is keyed on a null agency_id.
-        csv_text = "agency_name,agency_url,agency_timezone\nMetro,https://m.example,UTC\n"
+        csv_text = (
+            "agency_name,agency_url,agency_timezone\nMetro,https://m.example,UTC\n"
+        )
         headers, index = _read_csv_index(
             io.StringIO(csv_text), get_primary_key("agency.txt"), "agency.txt"
         )
@@ -1555,9 +1557,7 @@ class TestMissingPrimaryKeyNotCompared:
             tmp_path / "base.zip",
             {
                 "stops.txt": (
-                    "stop_name,stop_lat,stop_lon\n"
-                    "Stop One,1.0,2.0\n"
-                    "Stop Two,3.0,4.0\n"
+                    "stop_name,stop_lat,stop_lon\nStop One,1.0,2.0\nStop Two,3.0,4.0\n"
                 ),
             },
         )

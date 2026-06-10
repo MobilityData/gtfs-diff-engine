@@ -679,9 +679,7 @@ def _diff_file_modified(
         with base_opener() as f:
             _trace(f"  [{file_name}] indexing base feed...")
             t0 = time.monotonic()
-            base_headers, base_index = _read_csv_index(
-                f, pk_cols, file_name=file_name
-            )
+            base_headers, base_index = _read_csv_index(f, pk_cols, file_name=file_name)
             _trace(
                 f"  [{file_name}] base index done: {len(base_index):,} "
                 f"rows in {time.monotonic() - t0:.1f}s"
@@ -817,9 +815,7 @@ def _diff_file_modified(
 
         # Fill modified rows up to allocated cap (earliest rows first, by line).
         modified_order = sorted(modified_candidates, key=lambda c: c[2])
-        for pk_tuple, field_changes, b_line, n_line in modified_order[
-            :modified_limit
-        ]:
+        for pk_tuple, field_changes, b_line, n_line in modified_order[:modified_limit]:
             b_raw = base_index[pk_tuple][1]
             b_dict = _parse_raw_line(b_raw, base_headers)
             identifier, raw_value = _build_identifier_and_raw(

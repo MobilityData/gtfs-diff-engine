@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import urllib.error
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from gtfs_diff.engine import (
     _read_csv_index,
     diff_feeds,
 )
+from gtfs_diff.engine_duckdb import DUCKDB_TMPDIR_ENV, _resolve_spill_base
 from gtfs_diff.gtfs_definitions import (
     get_foreign_keys,
     get_optional_primary_key_columns,
@@ -2283,6 +2285,57 @@ class TestDuckDBBackend:
         monkeypatch.setattr(engine_duckdb, "is_duckdb_available", lambda: False)
         fallback = diff_feeds(base, new, large_file_threshold_bytes=0)
         assert _sorted_diff(mem) == _sorted_diff(fallback)
+
+
+class TestDuckDBSpillBase:
+    def test_unset_env_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv(DUCKDB_TMPDIR_ENV, raising=False)
+
+        assert _resolve_spill_base() is None
+
+    def test_empty_env_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(DUCKDB_TMPDIR_ENV, "")
+
+        assert _resolve_spill_base() is None
+
+    def test_whitespace_env_returns_none(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv(DUCKDB_TMPDIR_ENV, "   ")
+
+        assert _resolve_spill_base() is None
+
+    def test_existing_directory_returns_stripped_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv(DUCKDB_TMPDIR_ENV, f"  {tmp_path}  ")
+
+        assert _resolve_spill_base() == str(tmp_path)
+
+    def test_nested_directory_is_created(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        spill_base = tmp_path / "nested" / "spill"
+        monkeypatch.setenv(DUCKDB_TMPDIR_ENV, str(spill_base))
+
+        assert _resolve_spill_base() == str(spill_base)
+        assert os.path.isdir(spill_base)
+
+    def test_leading_tilde_is_expanded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        fake_home = tmp_path / "home"
+
+        def fake_expanduser(path: str) -> str:
+            return path.replace("~", str(fake_home), 1)
+
+        monkeypatch.setattr(os.path, "expanduser", fake_expanduser)
+        monkeypatch.setenv(DUCKDB_TMPDIR_ENV, "~/some_subdir_unlikely")
+
+        resolved = _resolve_spill_base()
+
+        assert resolved is not None
+        assert not resolved.startswith("~")
+        assert resolved.startswith(str(fake_home))
+        assert os.path.isdir(resolved)
 
 
 class TestDuckDBRemoteUrl:

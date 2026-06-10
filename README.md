@@ -348,6 +348,12 @@ For modified files, `stats.rows_changed_percentage` is the percentage of rows th
 
 `stats.column_stats` is per-column modification statistics. Only covers modified rows. Each entry has `column`, `modifications_count`, and `modifications_percentage`; the count is the number of modified rows whose value changed in that column, and the percentage is relative to total modified rows. Counts are true counts, unaffected by caps. Columns with no modified-row changes are omitted, and entries follow `row_changes.columns` order. `column_stats` is `null` when there are no modifications or when `column_stats=False` / `--no-column-stats` is used. These stats appear only for files with `file_action: "modified"`.
 
+## Configuration
+
+### Environment variables
+
+- `GTFS_DIFF_DUCKDB_TMPDIR`: optional base directory for DuckDB's on-disk spill files when the DuckDB backend handles large eligible files (50 MB+ by default). Set this to a volume with enough free space if the system temp directory (for example, `/tmp`) is too small for multi-gigabyte feed comparisons. A leading `~` is expanded and the directory is created if needed. If unset or blank, the engine uses the system temp directory.
+
 ## Memory Efficiency
 
 The engine uses a **streaming two-pass algorithm**:

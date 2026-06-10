@@ -31,6 +31,7 @@ Parity is preserved by:
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import tempfile
 
@@ -58,6 +59,35 @@ from .tracing import _trace
 # Read modest batches when streaming candidate rows so memory stays bounded
 # regardless of how many rows differ.
 _FETCH_BATCH = 10_000
+
+# Environment variable that overrides the base directory DuckDB spills to when
+# diffing large files. The system temp dir is often small (e.g. a few GB on
+# ``/tmp``); operators comparing multi-gigabyte feeds can point this at a volume
+# with enough room. Per-file spill subdirectories are still created beneath it
+# and cleaned up after each file.
+DUCKDB_TMPDIR_ENV = "GTFS_DIFF_DUCKDB_TMPDIR"
+
+
+def _resolve_spill_base() -> str | None:
+    """Return the base directory for DuckDB's on-disk spill, or ``None``.
+
+    Honors the :data:`DUCKDB_TMPDIR_ENV` environment variable. A leading ``~`` is
+    expanded and the directory is created if it does not exist. When the variable
+    is unset or blank, ``None`` is returned so spill falls back to the system temp
+    directory (:func:`tempfile.mkdtemp` default).
+
+    Raises:
+        OSError: If the override is set but the directory cannot be created
+            (e.g. a path component is a file, or permissions are insufficient).
+            Failing loudly is intentional: a misconfigured override should not be
+            silently ignored, which would send large spill to an unexpected disk.
+    """
+    raw = os.environ.get(DUCKDB_TMPDIR_ENV)
+    if raw is None or not raw.strip():
+        return None
+    base = os.path.expanduser(raw.strip())
+    os.makedirs(base, exist_ok=True)
+    return base
 
 
 def is_duckdb_available() -> bool:
@@ -156,8 +186,10 @@ def diff_modified_duckdb(
 
     # Spill goes to a managed temp dir we delete ourselves, rather than DuckDB's
     # default ``.tmp`` in the current working directory — large-file spill must
-    # never litter the caller's CWD and must be cleaned up after each file.
-    spill_dir = tempfile.mkdtemp(prefix="gtfs_duckdb_")
+    # never litter the caller's CWD and must be cleaned up after each file. The
+    # base directory honors the GTFS_DIFF_DUCKDB_TMPDIR override (see
+    # _resolve_spill_base); None falls back to the system temp dir.
+    spill_dir = tempfile.mkdtemp(prefix="gtfs_duckdb_", dir=_resolve_spill_base())
     con = duckdb.connect()
     try:
         con.execute("SET preserve_insertion_order=true")

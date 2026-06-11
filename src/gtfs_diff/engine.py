@@ -35,6 +35,7 @@ from typing import TextIO
 # Re-exported for backward compatibility (``gtfs_diff.engine`` has historically
 # been the import site for these helpers); they now live in focused modules.
 from .csv_utils import (
+    DuplicatePrimaryKeyError,  # noqa: F401  (re-export)
     MissingPrimaryKeyError,  # noqa: F401  (re-export)
     _is_url,
     _missing_required_pk_columns,
@@ -50,6 +51,7 @@ from .diff_helpers import (
     _compute_ignored_columns,
     _detect_id_churn,
     _diff_columns,
+    _duplicate_primary_key_reason,
     _missing_primary_key_reason,
     _processing_order,
     _scan_modifications,
@@ -580,10 +582,6 @@ def _maybe_diff_modified_duckdb(
                 not_compared_files=not_compared_files,
                 column_stats=column_stats,
             )
-    except ValueError:
-        # Duplicate primary key (or similar) — surface the error as the
-        # in-memory engine would, rather than silently masking it.
-        raise
     except Exception as exc:  # pragma: no cover - defensive fallback
         _trace(
             f"  [{file_name}] duckdb backend failed ({exc!r}) — "
@@ -614,6 +612,40 @@ def _build_missing_pk_not_compared(
     missing_base = _missing_required_pk_columns(base_headers, pk_cols, file_name)
     missing_new = _missing_required_pk_columns(new_headers, pk_cols, file_name)
     reason = _missing_primary_key_reason(missing_base, missing_new)
+    _trace(f"  [{file_name}] not compared — {reason.code}: {reason.message}")
+
+    columns_added, columns_deleted, _ = _diff_columns(base_headers, new_headers)
+    return _build_not_compared_diff(
+        file_name=file_name,
+        reason=reason,
+        columns_added=columns_added,
+        columns_deleted=columns_deleted,
+        base_row_count=base_count,
+        new_row_count=new_count,
+    )
+
+
+def _build_duplicate_pk_not_compared(
+    file_name: str,
+    base_opener: Callable[[], TextIO],
+    new_opener: Callable[[], TextIO],
+    error: DuplicatePrimaryKeyError,
+) -> tuple[FileDiff, FileSummary]:
+    """Build the ``not_compared`` result for a file with duplicate primary keys.
+
+    Re-reads the headers (and counts data rows) of both feeds to preserve
+    column-level differences and accurate row counts. Used as the fallback when
+    indexing raises :class:`DuplicatePrimaryKeyError`, so one file with
+    ambiguous keys no longer aborts the whole diff.
+    """
+    with base_opener() as f:
+        base_headers, base_count = _read_headers_and_count(f)
+    with new_opener() as f:
+        new_headers, new_count = _read_headers_and_count(f)
+
+    reason = _duplicate_primary_key_reason(
+        error.primary_key, detail=error.detail, side=error.side
+    )
     _trace(f"  [{file_name}] not compared — {reason.code}: {reason.message}")
 
     columns_added, columns_deleted, _ = _diff_columns(base_headers, new_headers)
@@ -671,15 +703,18 @@ def _diff_file_modified(
     if duckdb_result is not None:
         return duckdb_result
 
-    # Build indexes (two streaming passes, one per file). A file missing a
-    # required primary key column cannot be keyed/matched: instead of aborting
-    # the entire diff, report it as not_compared (preserving column-level
-    # differences) so the rest of the feed is still compared.
+    # Build indexes (two streaming passes, one per file). A file that cannot be
+    # keyed/matched — because it is missing a required primary key column or has
+    # duplicate primary key values — is reported as not_compared (preserving
+    # column-level differences) instead of aborting the entire diff, so the rest
+    # of the feed is still compared.
     try:
         with base_opener() as f:
             _trace(f"  [{file_name}] indexing base feed...")
             t0 = time.monotonic()
-            base_headers, base_index = _read_csv_index(f, pk_cols, file_name=file_name)
+            base_headers, base_index = _read_csv_index(
+                f, pk_cols, file_name=file_name, side="base"
+            )
             _trace(
                 f"  [{file_name}] base index done: {len(base_index):,} "
                 f"rows in {time.monotonic() - t0:.1f}s"
@@ -688,7 +723,9 @@ def _diff_file_modified(
         with new_opener() as f:
             _trace(f"  [{file_name}] indexing new feed...")
             t0 = time.monotonic()
-            new_headers, new_index = _read_csv_index(f, pk_cols, file_name=file_name)
+            new_headers, new_index = _read_csv_index(
+                f, pk_cols, file_name=file_name, side="new"
+            )
             _trace(
                 f"  [{file_name}] new index done:  {len(new_index):,} "
                 f"rows in {time.monotonic() - t0:.1f}s"
@@ -697,6 +734,8 @@ def _diff_file_modified(
         return _build_missing_pk_not_compared(
             file_name, base_opener, new_opener, pk_cols
         )
+    except DuplicatePrimaryKeyError as exc:
+        return _build_duplicate_pk_not_compared(file_name, base_opener, new_opener, exc)
 
     # Column-level diff
     columns_added, columns_deleted, union_columns = _diff_columns(

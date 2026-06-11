@@ -130,6 +130,11 @@ def _ignored_column_message(column: str, referenced: str, reason_code: str) -> s
             "was not compared because its primary key appears to be "
             "regenerated across versions (id_churn)"
         )
+    elif reason_code == "duplicate_primary_key":
+        cause = (
+            "was not compared because it has duplicate primary key values, so "
+            "its rows could not be uniquely matched"
+        )
     else:
         cause = "was not compared"
     return (
@@ -159,6 +164,49 @@ def _missing_primary_key_reason(
             f"Required primary key column(s) are absent: {detail}. Rows cannot "
             f"be matched without the primary key, so row-level comparison was "
             f"skipped to avoid a misleading diff."
+        ),
+    )
+
+
+def _feed_side_phrase(side: str | None) -> str:
+    """Return a human phrase naming the offending feed side(s).
+
+    ``side`` is ``"base"``, ``"new"``, ``"both"`` (or ``None`` when unknown).
+    """
+    if side == "base":
+        return "the base feed"
+    if side == "new":
+        return "the new feed"
+    if side == "both":
+        return "both the base and new feed"
+    return "the base or new feed"
+
+
+def _duplicate_primary_key_reason(
+    primary_key: list[str] | None,
+    detail: str | None = None,
+    side: str | None = None,
+) -> NotComparedReason:
+    """Build the ``not_compared`` reason for a file with duplicate primary keys.
+
+    Duplicate key values mean rows cannot be uniquely matched between feeds, so
+    the file is skipped (rather than aborting the whole diff) and reported with
+    column-level differences preserved. *side* names which feed contains the
+    duplicate (``"base"``, ``"new"``, ``"both"``, or ``None`` when unknown).
+    *detail*, when given, locates an example duplicate (e.g. the offending key
+    and line numbers).
+    """
+    pk = sorted(set(primary_key)) if primary_key else []
+    pk_part = f" {pk}" if pk else ""
+    extra = f" ({detail})" if detail else ""
+    where = _feed_side_phrase(side)
+    return NotComparedReason(
+        code="duplicate_primary_key",
+        message=(
+            f"Duplicate primary key{pk_part} value(s) were found in {where}"
+            f"{extra}, so rows cannot be uniquely matched between the base and "
+            f"new feed. Row-level comparison was skipped to avoid a misleading "
+            f"diff."
         ),
     )
 

@@ -43,6 +43,7 @@ from .diff_helpers import (
     _compute_ignored_columns,
     _detect_id_churn,
     _diff_columns,
+    _duplicate_primary_key_reason,
     _shared_columns,
     _split_row_changes_cap,
 )
@@ -176,9 +177,9 @@ def diff_modified_duckdb(
     URLs. URLs are read in place via DuckDB's ``httpfs`` extension (HTTP range
     requests), so the file is never fully downloaded by us.
 
-    Raises:
-        ValueError: If a duplicate primary key is found (parity with the
-            in-memory engine, which also refuses to diff such a file).
+    A file with a duplicate primary key is reported as ``not_compared`` (parity
+    with the in-memory engine) rather than raising, so one ambiguous file does
+    not abort the whole diff.
     """
     import duckdb
 
@@ -222,10 +223,29 @@ def diff_modified_duckdb(
         _create_table(con, "base_t", base_path, base_headers)
         _create_table(con, "new_t", new_path, new_headers)
 
-        if _has_duplicate_pk(con, "base_t", pk_cols):
-            raise ValueError(f"{file_name}: duplicate primary key in base feed.")
-        if _has_duplicate_pk(con, "new_t", pk_cols):
-            raise ValueError(f"{file_name}: duplicate primary key in new feed.")
+        dup_base = _has_duplicate_pk(con, "base_t", pk_cols)
+        dup_new = _has_duplicate_pk(con, "new_t", pk_cols)
+        if dup_base or dup_new:
+            # Duplicate keys mean rows can't be uniquely matched. Report the file
+            # as not_compared (parity with the in-memory engine) instead of
+            # aborting the whole diff. Counts/headers are already loaded, so no
+            # re-read of the large file is needed.
+            side = "both" if dup_base and dup_new else ("base" if dup_base else "new")
+            reason = _duplicate_primary_key_reason(pk_cols, side=side)
+            _trace(
+                f"  [{file_name}] (duckdb) not compared — "
+                f"{reason.code}: {reason.message}"
+            )
+            total_base = con.execute("SELECT COUNT(*) FROM base_t").fetchone()[0]
+            total_new = con.execute("SELECT COUNT(*) FROM new_t").fetchone()[0]
+            return _build_not_compared_diff(
+                file_name=file_name,
+                reason=reason,
+                columns_added=columns_added,
+                columns_deleted=columns_deleted,
+                base_row_count=total_base,
+                new_row_count=total_new,
+            )
 
         total_base = con.execute("SELECT COUNT(*) FROM base_t").fetchone()[0]
         total_new = con.execute("SELECT COUNT(*) FROM new_t").fetchone()[0]

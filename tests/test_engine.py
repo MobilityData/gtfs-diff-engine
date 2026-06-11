@@ -11,8 +11,10 @@ from pathlib import Path
 import pytest
 
 from gtfs_diff import engine_duckdb
-from gtfs_diff.diff_helpers import _split_row_changes_cap
+from gtfs_diff.csv_utils import DuplicatePrimaryKeyError as CsvDuplicatePrimaryKeyError
+from gtfs_diff.diff_helpers import _duplicate_primary_key_reason, _split_row_changes_cap
 from gtfs_diff.engine import (
+    DuplicatePrimaryKeyError,
     FeedFileMeta,
     MissingPrimaryKeyError,
     _eligible_for_duckdb,
@@ -2037,7 +2039,7 @@ def _sorted_diff(result: GtfsDiff) -> dict:
     return d
 
 
-def _assert_duckdb_parity(
+def _diff_with_both_backends(
     tmp_path: Path,
     base_files: dict[str, str],
     new_files: dict[str, str],
@@ -2057,6 +2059,22 @@ def _assert_duckdb_parity(
         new,
         row_changes_cap_per_file=row_changes_cap_per_file,
         large_file_threshold_bytes=0,
+    )
+    return mem, duck
+
+
+def _assert_duckdb_parity(
+    tmp_path: Path,
+    base_files: dict[str, str],
+    new_files: dict[str, str],
+    *,
+    row_changes_cap_per_file: int | None = None,
+) -> tuple[GtfsDiff, GtfsDiff]:
+    mem, duck = _diff_with_both_backends(
+        tmp_path,
+        base_files,
+        new_files,
+        row_changes_cap_per_file=row_changes_cap_per_file,
     )
     assert _sorted_diff(mem) == _sorted_diff(duck)
     return mem, duck
@@ -2199,7 +2217,54 @@ class TestDuckDBBackend:
             assert fd.stats.rows_added_count == 1
             assert fd.stats.rows_modified_count == 1
 
-    def test_duplicate_primary_key_raises_in_both_backends(self, tmp_path: Path):
+    def test_duplicate_primary_key_not_compared_in_both_backends(self, tmp_path: Path):
+        base = {"stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n"}
+        new = {"stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n"}
+
+        mem, duck = _diff_with_both_backends(tmp_path, base, new)
+        for result in (mem, duck):
+            fd = _get_file_diff(result, "stops.txt")
+            assert fd.file_action == "not_compared"
+            assert fd.not_compared_reason is not None
+            assert fd.not_compared_reason.code == "duplicate_primary_key"
+            assert "stop_id" in fd.not_compared_reason.message
+
+        mem_message = _get_file_diff(mem, "stops.txt").not_compared_reason.message
+        assert "found in the base feed" in mem_message
+        duck_message = _get_file_diff(duck, "stops.txt").not_compared_reason.message
+        assert "found in both the base and new feed" in duck_message
+
+    def test_duplicate_primary_key_in_base_only_is_not_compared(self, tmp_path: Path):
+        base = {"stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n"}
+        new = {"stops.txt": "stop_id,stop_name\nS1,Alpha\n"}
+
+        mem, duck = _diff_with_both_backends(tmp_path, base, new)
+        for result in (mem, duck):
+            fd = _get_file_diff(result, "stops.txt")
+            assert fd.file_action == "not_compared"
+            assert fd.not_compared_reason is not None
+            assert fd.not_compared_reason.code == "duplicate_primary_key"
+            message = fd.not_compared_reason.message
+            assert "found in the base feed" in message
+            assert "found in the new feed" not in message
+
+    def test_duplicate_primary_key_in_new_only_is_not_compared(self, tmp_path: Path):
+        base = {"stops.txt": "stop_id,stop_name\nS1,Alpha\n"}
+        new = {"stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n"}
+
+        mem, duck = _diff_with_both_backends(tmp_path, base, new)
+        for result in (mem, duck):
+            fd = _get_file_diff(result, "stops.txt")
+            assert fd.file_action == "not_compared"
+            assert fd.not_compared_reason is not None
+            assert fd.not_compared_reason.code == "duplicate_primary_key"
+            message = fd.not_compared_reason.message
+            assert "found in the new feed" in message
+            assert "found in the base feed" not in message
+
+    def test_duplicate_primary_key_in_both_in_memory_short_circuits_on_base(
+        self, tmp_path: Path
+    ):
         base = _write_feed_dir(
             tmp_path,
             "base",
@@ -2208,12 +2273,128 @@ class TestDuckDBBackend:
         new = _write_feed_dir(
             tmp_path,
             "new",
-            {"stops.txt": "stop_id,stop_name\nS1,Alpha\n"},
+            {"stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n"},
         )
-        with pytest.raises(ValueError, match="duplicate primary key"):
-            diff_feeds(base, new, large_file_threshold_bytes=None)
-        with pytest.raises(ValueError, match="duplicate primary key"):
-            diff_feeds(base, new, large_file_threshold_bytes=0)
+
+        result = diff_feeds(base, new, large_file_threshold_bytes=None)
+
+        fd = _get_file_diff(result, "stops.txt")
+        assert fd.file_action == "not_compared"
+        assert fd.not_compared_reason is not None
+        assert fd.not_compared_reason.code == "duplicate_primary_key"
+        assert "found in the base feed" in fd.not_compared_reason.message
+
+    def test_duplicate_primary_key_does_not_abort_whole_diff(self, tmp_path: Path):
+        base = {
+            "stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n",
+            "routes.txt": "route_id,route_short_name\nR1,One\n",
+        }
+        new = {
+            "stops.txt": "stop_id,stop_name\nS1,Alpha\n",
+            "routes.txt": "route_id,route_short_name\nR1,Route One\n",
+        }
+
+        mem, duck = _diff_with_both_backends(tmp_path, base, new)
+        for result in (mem, duck):
+            stops = _get_file_diff(result, "stops.txt")
+            assert stops.file_action == "not_compared"
+            assert stops.not_compared_reason.code == "duplicate_primary_key"
+            assert _get_file_diff(result, "routes.txt").file_action == "modified"
+
+    def test_duplicate_primary_key_summary_status_count_stats_and_columns(
+        self, tmp_path: Path
+    ):
+        base = {
+            "stops.txt": (
+                "stop_id,stop_name,stop_lat\nS1,Alpha,1.0\nS1,Duplicate,1.1\n"
+            )
+        }
+        new = {
+            "stops.txt": (
+                "stop_id,stop_name,stop_lon,stop_desc\n"
+                "S1,Alpha,2.0,First\n"
+                "S2,Beta,3.0,Second\n"
+                "S3,Gamma,4.0,Third\n"
+            )
+        }
+
+        mem, duck = _diff_with_both_backends(tmp_path, base, new)
+        for result in (mem, duck):
+            fs = _get_file_summary(result, "stops.txt")
+            assert fs.status == "not_compared"
+            assert result.summary.files_not_compared_count == 1
+
+            fd = _get_file_diff(result, "stops.txt")
+            assert fd.file_action == "not_compared"
+            assert fd.stats.total_rows_base == 2
+            assert fd.stats.total_rows_new == 3
+            assert [c.name for c in fd.columns_added] == ["stop_lon", "stop_desc"]
+            assert [c.name for c in fd.columns_deleted] == ["stop_lat"]
+
+    def test_fk_column_ignored_when_referenced_file_has_duplicate_pk(
+        self, tmp_path: Path
+    ):
+        assert "stops.txt" in get_foreign_keys("stop_times.txt")["stop_id"]
+        stop_times_header = (
+            "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"
+        )
+        base = {
+            "stops.txt": "stop_id,stop_name\nS1,Alpha\nS1,Duplicate\n",
+            "stop_times.txt": stop_times_header + "T1,08:00:00,08:00:00,S1,1\n",
+        }
+        new = {
+            "stops.txt": "stop_id,stop_name\nS1,Alpha\n",
+            "stop_times.txt": stop_times_header + "T1,08:05:00,08:00:00,S2,1\n",
+        }
+
+        mem, duck = _diff_with_both_backends(tmp_path, base, new)
+        for result in (mem, duck):
+            stops = _get_file_diff(result, "stops.txt")
+            assert stops.file_action == "not_compared"
+            assert stops.not_compared_reason.code == "duplicate_primary_key"
+
+            stop_times = _get_file_diff(result, "stop_times.txt")
+            assert stop_times.file_action == "modified"
+            assert stop_times.ignored_columns is not None
+            ignored = {ic.column: ic.reason.code for ic in stop_times.ignored_columns}
+            assert ignored == {"stop_id": "references_not_compared_file"}
+            changed_fields = {
+                fc.field for fc in stop_times.row_changes.modified[0].field_changes
+            }
+            assert changed_fields == {"arrival_time"}
+
+    def test_duplicate_primary_key_reason_and_error_reexport(self):
+        reason = _duplicate_primary_key_reason(["stop_id"])
+        assert reason.code == "duplicate_primary_key"
+        assert "stop_id" in reason.message
+        assert "found in the base or new feed" in reason.message
+        assert (
+            "found in the base feed"
+            in _duplicate_primary_key_reason(["stop_id"], side="base").message
+        )
+        assert (
+            "found in the new feed"
+            in _duplicate_primary_key_reason(["stop_id"], side="new").message
+        )
+        assert (
+            "found in both the base and new feed"
+            in _duplicate_primary_key_reason(["stop_id"], side="both").message
+        )
+
+        error = DuplicatePrimaryKeyError(
+            "stops.txt",
+            ["stop_id"],
+            {"stop_id": "S1"},
+            line_number=3,
+            first_line=2,
+            side="new",
+        )
+        assert isinstance(error, ValueError)
+        assert issubclass(DuplicatePrimaryKeyError, ValueError)
+        assert DuplicatePrimaryKeyError is CsvDuplicatePrimaryKeyError
+        assert error.detail is not None
+        assert "stop_id" in error.detail
+        assert error.side == "new"
 
     def test_eligibility_rules(self):
         assert not _eligible_for_duckdb(

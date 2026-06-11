@@ -35,6 +35,53 @@ class MissingPrimaryKeyError(ValueError):
         )
 
 
+class DuplicatePrimaryKeyError(ValueError):
+    """Raised when duplicate primary key values are found in a file's rows.
+
+    A duplicate key means rows cannot be uniquely matched between feeds, so the
+    file is reported as ``not_compared`` (like a missing primary key) rather than
+    aborting the whole diff. Subclasses :class:`ValueError` for backward
+    compatibility with callers that caught the previously-raised ``ValueError``.
+    """
+
+    def __init__(
+        self,
+        file_name: str,
+        primary_key: list[str],
+        duplicate_key: dict[str, str] | None = None,
+        line_number: int | None = None,
+        first_line: int | None = None,
+        side: str | None = None,
+    ) -> None:
+        self.file_name = file_name
+        self.primary_key = primary_key
+        self.duplicate_key = duplicate_key
+        self.line_number = line_number
+        self.first_line = first_line
+        self.side = side
+        location = ""
+        if line_number is not None and first_line is not None:
+            location = f" at line {line_number} (first seen at line {first_line})"
+        feed = f" in the {side} feed" if side in ("base", "new") else ""
+        super().__init__(
+            f"{file_name}: duplicate primary key "
+            f"{duplicate_key if duplicate_key is not None else primary_key}"
+            f"{location}{feed}."
+        )
+
+    @property
+    def detail(self) -> str | None:
+        """A short human-readable locator for the first duplicate, if known."""
+        if self.duplicate_key is None:
+            return None
+        if self.line_number is not None and self.first_line is not None:
+            return (
+                f"e.g. {self.duplicate_key} appears at lines "
+                f"{self.first_line} and {self.line_number}"
+            )
+        return f"e.g. {self.duplicate_key}"
+
+
 def _row_to_csv(values: list[str]) -> str:
     """Serialize a list of string values to a single CSV line (no trailing newline)."""
     buf = io.StringIO()
@@ -93,6 +140,7 @@ def _read_csv_index(
     text_io: TextIO,
     pk_columns: list[str] | None = None,
     file_name: str = "<unknown>",
+    side: str | None = None,
 ) -> tuple[list[str], dict[tuple, tuple[int, str]]]:
     """Stream a CSV file and build a primary-key → (line_number, raw_csv_string) index.
 
@@ -101,6 +149,9 @@ def _read_csv_index(
         pk_columns: Columns that form the primary key.  `None` / empty list
                     means use *all* columns as the composite key.
         file_name:  Used in error messages only.
+        side:       Which feed this stream belongs to (``"base"`` / ``"new"``),
+                    recorded on a raised :class:`DuplicatePrimaryKeyError` so the
+                    not_compared reason can name the offending feed.
 
     Returns:
         headers: Stripped column names from the header row.
@@ -111,8 +162,8 @@ def _read_csv_index(
     Raises:
         MissingPrimaryKeyError: If expected primary key columns are absent from
                     the header (diff would silently treat all rows as identical).
-        ValueError: If duplicate primary key values are found (diff would
-                    silently discard earlier rows).
+        DuplicatePrimaryKeyError: If duplicate primary key values are found (diff
+                    would silently discard earlier rows).
     """
     reader = csv.reader(text_io)
     try:
@@ -144,11 +195,13 @@ def _read_csv_index(
         pk_tuple = tuple(row_dict.get(col, "") for col in effective_pk)
 
         if pk_tuple in index:
-            raise ValueError(
-                f"{file_name}: duplicate primary key "
-                f"{dict(zip(effective_pk, pk_tuple, strict=True))} "
-                f"at line {line_num} "
-                f"(first seen at line {index[pk_tuple][0]})."
+            raise DuplicatePrimaryKeyError(
+                file_name,
+                list(effective_pk),
+                duplicate_key=dict(zip(effective_pk, pk_tuple, strict=True)),
+                line_number=line_num,
+                first_line=index[pk_tuple][0],
+                side=side,
             )
 
         index[pk_tuple] = (line_num, _row_to_csv(row_vals))

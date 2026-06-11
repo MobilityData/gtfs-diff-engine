@@ -67,7 +67,7 @@ class NotComparedReason(BaseModel):
     )
     code: str = Field(
         ...,
-        description='Machine-readable reason code (e.g. "id_churn", "missing_primary_key", "file_too_large").',
+        description='Machine-readable reason code (e.g. "id_churn", "missing_primary_key", "duplicate_primary_key", "file_too_large").',
     )
     message: str = Field(
         ...,

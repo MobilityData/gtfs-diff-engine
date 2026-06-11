@@ -98,7 +98,7 @@ Comparing only shared columns ensures that adding or removing a column from a fi
 
 ### Optional primary-key columns
 
-Most GTFS files have mandatory primary-key columns: if any are absent from a feed header, the low-level indexing helper raises `MissingPrimaryKeyError` rather than producing an unreliable row diff. The engine catches that error at the per-file boundary and reports just that file as `not_compared` with reason code `missing_primary_key`; the overall feed diff continues, and column-level differences for the affected file are still populated. As with `id_churn`, foreign-key columns in other files that reference the `not_compared` file are excluded from field-level diffs and listed under `ignored_columns` with reason code `references_not_compared_file`. Some files, however, define conditionally-present key columns. For example, `translations.txt` identifies a translation by either `record_id` (optionally with `record_sub_id`) or `field_value`; real feeds usually include only the subset required for the form they use.
+Most GTFS files have mandatory primary-key columns: if any are absent from a feed header, the low-level indexing helper raises `MissingPrimaryKeyError` rather than producing an unreliable row diff. The engine catches that error at the per-file boundary and reports just that file as `not_compared` with reason code `missing_primary_key`; duplicate primary-key values are handled the same way with reason code `duplicate_primary_key`. The overall feed diff continues, and column-level differences for the affected file are still populated. For these primary-key problems, the reason message identifies whether the base feed, new feed, or both feeds caused the issue. As with `id_churn`, foreign-key columns in other files that reference the `not_compared` file are excluded from field-level diffs and listed under `ignored_columns` with reason code `references_not_compared_file`. Some files, however, define conditionally-present key columns. For example, `translations.txt` identifies a translation by either `record_id` (optionally with `record_sub_id`) or `field_value`; real feeds usually include only the subset required for the form they use.
 
 For these optional primary-key columns, `_read_csv_index` keeps the file's **full** primary key and treats any optional column that is absent from a feed's headers as a null (empty) value for every row — effectively adding the missing PK header and filling it with nulls *for the compare step only*. This guarantees both feeds build their composite key over an identical set of columns, so a feed that omits an optional key column still aligns with one that includes it (instead of every row looking added/deleted). The padding affects only row identity during comparison: the injected columns are never added to the reported headers, column diff, or row values.
 
@@ -115,7 +115,7 @@ The switch is deliberately conservative. A file is sent to DuckDB only when **al
 - both feed sizes are cheaply known;
 - the file has a simple, explicit primary key with no optional or conditional PK columns.
 
-Empty-PK files and files with optional primary-key columns, such as `translations.txt`, always stay on the in-memory engine. Added and deleted files also stay on the normal code path; the DuckDB backend is only used for files present in both feeds. If the size is unknown, the PK is ineligible, or the file is below the threshold, the safe default is the in-memory engine. Any DuckDB backend error is traced and falls back to the in-memory engine (a defensive safeguard that also covers an unexpectedly missing `duckdb` install), except duplicate-primary-key `ValueError`s, which propagate just as they do in the in-memory path.
+Empty-PK files and files with optional primary-key columns, such as `translations.txt`, always stay on the in-memory engine. Added and deleted files also stay on the normal code path; the DuckDB backend is only used for files present in both feeds. If the size is unknown, the PK is ineligible, or the file is below the threshold, the safe default is the in-memory engine. Any DuckDB backend error is traced and falls back to the in-memory engine (a defensive safeguard that also covers an unexpectedly missing `duckdb` install); duplicate-primary-key files are reported directly as `not_compared` with reason code `duplicate_primary_key`, matching the in-memory path.
 
 Size metadata comes from the cheapest source available for the feed type:
 
@@ -143,10 +143,10 @@ misleading row-by-row diff, the engine reports such a file with
 `row_changes` of `null`. Column-level differences (`columns_added` /
 `columns_deleted`) are still populated.
 
-The mechanism is generic: `id_churn`, `missing_primary_key`, and future reasons
-(file too large, etc.) reuse the same `not_compared` code path by returning a
-`NotComparedReason` from a detector or per-file error handler and short-circuiting
-`_diff_file_modified`.
+The mechanism is generic: `id_churn`, `missing_primary_key`,
+`duplicate_primary_key`, and future reasons (file too large, etc.) reuse the same
+`not_compared` code path by returning a `NotComparedReason` from a detector or
+per-file error handler and short-circuiting `_diff_file_modified`.
 
 ### Detecting regenerated ids (`id_churn`)
 
@@ -234,8 +234,9 @@ To handle this, `diff_feeds()`:
 
 2. **Ignores unreliable foreign-key columns.** When a child is diffed, any
    foreign-key column pointing at a file that was marked `not_compared` due to
-   `id_churn` or `missing_primary_key` is excluded from the field-level comparison
-   (`_scan_modifications`) and listed in the child's `ignored_columns`, each with
+   `id_churn`, `missing_primary_key`, or `duplicate_primary_key` is excluded from
+   the field-level comparison (`_scan_modifications`) and listed in the child's
+   `ignored_columns`, each with
    a `references_not_compared_file` reason. Primary-key columns are never ignored —
    if an unreliable referenced column is part of the child's own primary key, the
    normal per-file detection handles the child rather than treating that key as an

@@ -191,8 +191,9 @@ def diff_modified_duckdb(
     # base directory honors the GTFS_DIFF_DUCKDB_TMPDIR override (see
     # _resolve_spill_base); None falls back to the system temp dir.
     spill_dir = tempfile.mkdtemp(prefix="gtfs_duckdb_", dir=_resolve_spill_base())
-    con = duckdb.connect()
+    con = None
     try:
+        con = duckdb.connect()
         con.execute("SET preserve_insertion_order=true")
         con.execute("PRAGMA threads=1")  # deterministic row_number() line numbers
         con.execute("SET temp_directory=?", [spill_dir])
@@ -335,11 +336,14 @@ def diff_modified_duckdb(
         # Drop the per-file tables so DuckDB releases their buffers, then close
         # the connection (which also frees everything) and remove the spill dir.
         # Tables are dropped explicitly so the intent is clear and so memory is
-        # reclaimed promptly even if the connection were ever reused.
-        with contextlib.suppress(Exception):
-            con.execute("DROP TABLE IF EXISTS base_t")
-            con.execute("DROP TABLE IF EXISTS new_t")
-        con.close()
+        # reclaimed promptly even if the connection were ever reused. The spill
+        # dir is removed unconditionally — even if ``duckdb.connect()`` itself
+        # raised — so a failed connection never leaves an empty folder behind.
+        if con is not None:
+            with contextlib.suppress(Exception):
+                con.execute("DROP TABLE IF EXISTS base_t")
+                con.execute("DROP TABLE IF EXISTS new_t")
+            con.close()
         shutil.rmtree(spill_dir, ignore_errors=True)
 
     _trace(

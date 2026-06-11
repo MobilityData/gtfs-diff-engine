@@ -2518,6 +2518,36 @@ class TestDuckDBSpillBase:
         assert resolved.startswith(str(fake_home))
         assert os.path.isdir(resolved)
 
+    def test_spill_dir_removed_when_connect_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Regression: if duckdb.connect() raises, the just-created spill dir must
+        # still be cleaned up rather than leaking an empty folder.
+        spill_base = tmp_path / "spill"
+        spill_base.mkdir()
+        monkeypatch.setenv(DUCKDB_TMPDIR_ENV, str(spill_base))
+
+        import duckdb
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("connect failed")
+
+        monkeypatch.setattr(duckdb, "connect", boom)
+
+        with pytest.raises(RuntimeError, match="connect failed"):
+            engine_duckdb.diff_modified_duckdb(
+                file_name="stops.txt",
+                base_path=str(tmp_path / "missing_base.txt"),
+                new_path=str(tmp_path / "missing_new.txt"),
+                pk_cols=["stop_id"],
+                row_changes_cap=None,
+                id_churn_threshold=0.7,
+                not_compared_files={},
+            )
+
+        # No gtfs_duckdb_* spill directory should remain under the base.
+        assert list(spill_base.glob("gtfs_duckdb_*")) == []
+
 
 class TestDuckDBRemoteUrl:
     """The DuckDB backend reads remote files in place via httpfs (no download)."""

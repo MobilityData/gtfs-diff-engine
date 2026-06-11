@@ -918,9 +918,14 @@ def diff_feeds(
             * ``None``  — include all row changes (default).
             * ``0``     — omit all row-level detail (column diffs and counts
                           still computed).
-            * ``N > 0`` — include up to *N* row changes per file (added first, then
-                          deleted, then modified); a :class:`Truncated` record is
-                          attached when the true count exceeds *N*.
+            * ``N > 0`` — include up to *N* row changes per file, with the budget
+                          split fairly across the change types that have rows
+                          (added / deleted / modified) so a little of each is
+                          shown — one active type gets the whole cap, two split
+                          it ~50/50, three ~33/33/33, with any leftover
+                          redistributed to types that still have rows; a
+                          :class:`Truncated` record is attached when the true
+                          count exceeds *N*.
         base_downloaded_at:  When the base feed was downloaded; defaults to *now*.
         new_downloaded_at:   When the new feed was downloaded; defaults to *now*.
         id_churn_threshold:

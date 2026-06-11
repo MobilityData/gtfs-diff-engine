@@ -1,6 +1,7 @@
 annotated-types==0.7.0
 click==8.3.2
 coverage==7.13.5
+duckdb==1.5.3
 iniconfig==2.3.0
 packaging==26.1
 pluggy==1.6.0

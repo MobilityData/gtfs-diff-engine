@@ -7,6 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from gtfs_diff import engine_duckdb
 from gtfs_diff.cli import main
 from tests.helpers import write_zip
 
@@ -85,26 +86,13 @@ class TestCapOption:
         assert data["metadata"]["row_changes_cap_per_file"] == 5
 
 
-class TestMissingPrimaryKeyError:
-    def test_exits_nonzero_on_missing_pk_column(self, tmp_path: Path):
-        base = write_zip(
-            tmp_path / "base.zip",
-            {
-                "stops.txt": "stop_name,stop_lat,stop_lon\n"
-                "Stop One,1.0,2.0\n",  # stop_id absent
-            },
-        )
-        new = write_zip(
-            tmp_path / "new.zip",
-            {
-                "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
-            },
-        )
-        runner = CliRunner()
-        result = runner.invoke(main, [str(base), str(new)])
-        assert result.exit_code == 1
+class TestMissingPrimaryKeyNotCompared:
+    @staticmethod
+    def _stops_file_diff(result):
+        data = json.loads(result.stdout)
+        return next(fd for fd in data["file_diffs"] if fd["file_name"] == "stops.txt")
 
-    def test_error_message_names_file_and_missing_column(self, tmp_path: Path):
+    def test_succeeds_on_missing_pk_column_in_base(self, tmp_path: Path):
         base = write_zip(
             tmp_path / "base.zip",
             {
@@ -120,10 +108,33 @@ class TestMissingPrimaryKeyError:
         )
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new)])
-        assert "stops.txt" in result.output
-        assert "stop_id" in result.output
+        assert result.exit_code == 0, result.output
+        fd = self._stops_file_diff(result)
+        assert fd["file_action"] == "not_compared"
+        assert fd["not_compared_reason"]["code"] == "missing_primary_key"
 
-    def test_error_message_includes_headers_found(self, tmp_path: Path):
+    def test_succeeds_on_missing_pk_column_in_new(self, tmp_path: Path):
+        base = write_zip(
+            tmp_path / "base.zip",
+            {
+                "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
+            },
+        )
+        new = write_zip(
+            tmp_path / "new.zip",
+            {
+                "stops.txt": "stop_name,stop_lat,stop_lon\n"
+                "Stop One,1.0,2.0\n",  # stop_id absent
+            },
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [str(base), str(new)])
+        assert result.exit_code == 0, result.output
+        fd = self._stops_file_diff(result)
+        assert fd["file_action"] == "not_compared"
+        assert fd["not_compared_reason"]["code"] == "missing_primary_key"
+
+    def test_not_compared_reason_names_missing_column(self, tmp_path: Path):
         base = write_zip(
             tmp_path / "base.zip",
             {
@@ -139,7 +150,11 @@ class TestMissingPrimaryKeyError:
         )
         runner = CliRunner()
         result = runner.invoke(main, [str(base), str(new)])
-        assert "stop_name" in result.output
+        assert result.exit_code == 0, result.output
+        fd = self._stops_file_diff(result)
+        assert fd["file_action"] == "not_compared"
+        assert fd["not_compared_reason"]["code"] == "missing_primary_key"
+        assert "stop_id" in fd["not_compared_reason"]["message"]
 
 
 class TestInvalidPath:
@@ -169,3 +184,60 @@ class TestPrettyJson:
         # Should be valid JSON even without pretty-printing
         data = json.loads(result.stdout)
         assert "metadata" in data
+
+
+def _make_feed_dirs(tmp_path: Path):
+    base = tmp_path / "base_dir"
+    new = tmp_path / "new_dir"
+    base.mkdir()
+    new.mkdir()
+    (base / "stops.txt").write_text(TINY_BASE_FILES["stops.txt"], encoding="utf-8")
+    (new / "stops.txt").write_text(TINY_NEW_FILES["stops.txt"], encoding="utf-8")
+    return base, new
+
+
+def _json_without_metadata(output: str) -> dict:
+    data = json.loads(output)
+    data.pop("metadata", None)
+    return data
+
+
+class TestDuckDBOptions:
+    def test_no_duckdb_is_accepted_and_disables_backend(
+        self, tmp_path: Path, monkeypatch
+    ):
+        base, new = _make_feed_dirs(tmp_path)
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("DuckDB should not be called")
+
+        monkeypatch.setattr(engine_duckdb, "diff_modified_duckdb", fail_if_called)
+        result = CliRunner().invoke(main, [str(base), str(new), "--no-duckdb"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.stdout)
+        assert data["summary"]["total_changes"] == 1
+        assert data["file_diffs"][0]["stats"]["rows_added_count"] == 1
+
+    def test_large_file_threshold_zero_is_accepted_and_uses_duckdb(
+        self, tmp_path: Path, monkeypatch
+    ):
+        base, new = _make_feed_dirs(tmp_path)
+        original = engine_duckdb.diff_modified_duckdb
+        calls = []
+
+        def record_call(*args, **kwargs):
+            calls.append(kwargs["file_name"])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(engine_duckdb, "diff_modified_duckdb", record_call)
+        duck = CliRunner().invoke(
+            main, [str(base), str(new), "--large-file-threshold-mb", "0"]
+        )
+        assert duck.exit_code == 0, duck.output
+        assert calls == ["stops.txt"]
+
+        normal = CliRunner().invoke(main, [str(base), str(new), "--no-duckdb"])
+        assert normal.exit_code == 0, normal.output
+        assert _json_without_metadata(duck.stdout) == _json_without_metadata(
+            normal.stdout
+        )

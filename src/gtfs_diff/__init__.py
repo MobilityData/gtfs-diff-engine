@@ -1,3 +1,8 @@
 """GTFS Diff Engine - compare two GTFS feeds and surface structured differences."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("gtfs-diff-engine")
+except PackageNotFoundError:
+    __version__ = "unknown"

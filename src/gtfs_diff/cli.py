@@ -11,7 +11,7 @@ from gtfs_diff.gtfs_definitions import DEFAULT_ID_CHURN_THRESHOLD
 
 
 @click.command()
-@click.version_option(version="0.1.0", prog_name="gtfs-diff-engine")
+@click.version_option(package_name="gtfs-diff-engine", prog_name="gtfs-diff-engine")
 @click.argument("base_feed", type=str)
 @click.argument("new_feed", type=str)
 @click.option(

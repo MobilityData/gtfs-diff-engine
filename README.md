@@ -376,27 +376,21 @@ pytest tests/ -v
 
 ## Releasing a New Version
 
-1. **Bump the version** in `pyproject.toml`:
-   ```toml
-   [project]
-   version = "x.y.z"
-   ```
+The version is derived automatically from git tags via `hatch-vcs` — no manual version bumps needed.
 
-2. **Commit and push** the version bump to `main`.
-
-3. **Create a GitHub Release** via the GitHub UI (or `gh release create`):
+1. **Create a GitHub Release** via the GitHub UI (or `gh release create`):
    - Set the tag to `vx.y.z` (e.g. `v0.2.0`)
    - Write a release title and notes summarising changes
    - Click **Publish release**
 
-4. **The publish workflow fires automatically.** The [`Publish to PyPI`](.github/workflows/publish.yml) GitHub Actions workflow triggers on release publication, builds the package, and pushes it to PyPI via [Trusted Publisher (OIDC)](https://docs.pypi.org/trusted-publishers/) — no API token required.
+2. **The publish workflow fires automatically.** The [`python-release.yml`](.github/workflows/python-release.yml) GitHub Actions workflow triggers on release publication, builds the package (reading the version from the git tag), and pushes it to PyPI via [Trusted Publisher (OIDC)](https://docs.pypi.org/trusted-publishers/) — no API token required.
 
-5. **Verify** the new version appears on [https://pypi.org/project/gtfs-diff-engine](https://pypi.org/project/gtfs-diff-engine) and is installable:
+3. **Verify** the new version appears on [https://pypi.org/project/gtfs-diff-engine](https://pypi.org/project/gtfs-diff-engine) and is installable:
    ```bash
    pip install gtfs-diff-engine==x.y.z
    ```
 
-> **One-time PyPI setup:** A maintainer must configure the repository as a Trusted Publisher on PyPI before the first automated release. Go to the [gtfs-diff-engine PyPI project](https://pypi.org/manage/project/gtfs-diff-engine/settings/publishing/), add a publisher for `MobilityData/gtfs-diff-engine`, workflow `publish.yml`, environment `pypi`.
+> **One-time PyPI setup:** A maintainer must configure the repository as a Trusted Publisher on PyPI before the first automated release. Go to the [gtfs-diff-engine PyPI project](https://pypi.org/manage/project/gtfs-diff-engine/settings/publishing/), add a publisher for `MobilityData/gtfs-diff-engine`, workflow `python-release.yml`, environment `pypi`.
 
 ## License
 

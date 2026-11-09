@@ -8,13 +8,14 @@ objects or plain data structures.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
-from .csv_utils import _compute_raw_value, _parse_raw_line, _values_differ
-from .gtfs_definitions import (
+from ..feeds.csv_utils import _compute_raw_value, _parse_raw_line, _values_differ
+from ..gtfs_definitions import (
     MIN_ROWS_FOR_ID_CHURN_DETECTION,
     get_foreign_keys,
 )
-from .models import (
+from ..models import (
     ColumnEntry,
     ColumnStat,
     FieldChange,
@@ -29,7 +30,10 @@ from .models import (
     RowModified,
     Truncated,
 )
-from .tracing import _trace
+from ..tracing import _trace
+
+if TYPE_CHECKING:
+    from ..matching import FileTranslation
 
 
 def _processing_order(files: list[str]) -> list[str]:
@@ -355,6 +359,7 @@ def _scan_modifications(
     base_headers: list[str],
     new_headers: list[str],
     ignored_columns: set[str] | None = None,
+    translation: FileTranslation | None = None,
 ) -> list[tuple[tuple, list[FieldChange], int, int]]:
     """Scan rows present in both feeds and return those whose field values differ.
 
@@ -380,11 +385,7 @@ def _scan_modifications(
         n_line, n_raw = new_index[pk_tuple]
         b_dict = _parse_raw_line(b_raw, base_headers)
         n_dict = _parse_raw_line(n_raw, new_headers)
-        field_changes = [
-            FieldChange(field=col, base_value=b_dict[col], new_value=n_dict[col])
-            for col in shared_cols
-            if _values_differ(b_dict.get(col, ""), n_dict.get(col, ""))
-        ]
+        field_changes = _row_field_changes(b_dict, n_dict, shared_cols, translation)
         if field_changes:
             candidates.append((pk_tuple, field_changes, b_line, n_line))
 
@@ -393,6 +394,84 @@ def _scan_modifications(
         f"{len(candidates):,} modified"
     )
     return candidates
+
+
+def _row_field_changes(
+    b_dict: dict[str, str],
+    n_dict: dict[str, str],
+    shared_cols: list[str],
+    translation: FileTranslation | None = None,
+) -> list[FieldChange]:
+    """Field changes between a base row and the new row paired with it.
+
+    A matched ID column is compared through *translation*, so a new ID for a
+    matched entity is not a change, unless it is one of the translation's
+    ``key_columns``. Values are always reported as published.
+    """
+    changes = []
+    for col in shared_cols:
+        b = b_dict.get(col, "")
+        n = n_dict.get(col, "")
+        compared = n
+        if (
+            translation is not None
+            and translation.translates(col)
+            and col not in translation.key_columns
+        ):
+            compared = translation.row_key(col, n_dict)
+        if _values_differ(b, compared):
+            changes.append(FieldChange(field=col, base_value=b, new_value=n))
+    return changes
+
+
+def _new_identifier(
+    identifier: dict[str, str], n_dict: dict[str, str], pk_cols: list[str]
+) -> dict[str, str] | None:
+    """The new row's published key when it differs from the base row's key."""
+    published = {col: n_dict.get(col, "") for col in pk_cols}
+    return published if published != identifier else None
+
+
+def _select_modified(candidates, limit, line_of, fields_of, column_order, first=None):
+    """Pick up to *limit* modified rows so every changed column has examples.
+
+    Rows whose base line is in *first* (rows behind notable highlights) are
+    picked before any other. Then columns take turns, in *column_order*, each
+    taking its earliest row (by base line) not already picked, until *limit*
+    rows are picked. The result is in
+    base line order. With no *limit*, or few enough rows, all rows are kept.
+    Each column only ever reaches into its first ``2 * limit`` rows, so callers
+    that stream rows may keep just those.
+    """
+    ordered = sorted(candidates, key=line_of)
+    if limit is None or len(ordered) <= limit:
+        return ordered
+    by_column: dict[str, list] = {}
+    for c in ordered:
+        for f in fields_of(c):
+            by_column.setdefault(f, []).append(c)
+    columns = [c for c in column_order if c in by_column]
+    columns += sorted(set(by_column) - set(columns))
+    out: list = [c for c in ordered if first and line_of(c) in first][:limit]
+    picked: set = {line_of(c) for c in out}
+    position = dict.fromkeys(columns, 0)
+    while len(out) < limit:
+        progressed = False
+        for col in columns:
+            rows, i = by_column[col], position[col]
+            while i < len(rows) and line_of(rows[i]) in picked:
+                i += 1
+            if i < len(rows):
+                picked.add(line_of(rows[i]))
+                out.append(rows[i])
+                i += 1
+                progressed = True
+            position[col] = i
+            if len(out) >= limit:
+                break
+        if not progressed:
+            break
+    return sorted(out, key=line_of)
 
 
 def _split_row_changes_cap(

@@ -1,0 +1,1583 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>GTFS diff</title>
+<style>
+:root {
+  --bg: #ffffff; --ink: #15161a; --ink-2: #3c3f46; --muted: #6a6e77; --faint: #a2a6ad;
+  --line: #ececea; --line-2: #dcdcd8; --hover: #f4f4f2; --raised: #ffffff;
+  --accent: #2c55e8; --accent-soft: rgba(44, 85, 232, .09);
+  --add: #12804a; --add-soft: rgba(18, 128, 74, .10);
+  --del: #d2342e; --del-soft: rgba(210, 52, 46, .09);
+  --mod: #b36a00; --mod-soft: rgba(179, 106, 0, .11);
+  --hl: #c3560b; --hl-soft: rgba(195, 86, 11, .08);
+  --same: #5b5e66; --casing: #ffffff; --map-bg: #f3f3f1; --grid: rgba(20, 20, 30, .07);
+  --shadow: 0 1px 2px rgba(15, 16, 20, .06), 0 12px 32px rgba(15, 16, 20, .10);
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13.5px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 40px; }
+.mono { font-family: var(--mono); font-size: .9em; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.t-add { color: var(--add); } .t-del { color: var(--del); } .t-mod { color: var(--mod); } .t-hl { color: var(--hl); }
+.ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
+.link { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-weight: 550;
+  display: inline-flex; align-items: center; gap: 6px; }
+.link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.link .ico { width: 14px; height: 14px; transition: transform .15s; }
+.link:hover .ico { transform: translateX(2px); }
+
+/* Top bar and hero */
+.topbar { display: flex; align-items: center; justify-content: space-between; height: 52px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; font-size: 13.5px; }
+.brand svg { width: 20px; height: 20px; }
+.actions { display: flex; align-items: center; gap: 4px; }
+.ghost { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 5px 9px; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+.ghost:hover { background: var(--hover); color: var(--ink); }
+.hero { padding-top: 22px; padding-bottom: 30px; }
+.releases { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 20px; margin-bottom: 18px; }
+.rel-k { display: block; font-size: 11px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
+.rel-d { display: block; font-size: 14px; font-weight: 600; }
+.rel-n { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--muted); max-width: 46ch;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-arrow { color: var(--faint); padding-bottom: 16px; }
+.rel-arrow .ico { width: 18px; height: 18px; stroke-width: 1.5; }
+h1 { font-size: clamp(28px, 2.9vw, 38px); line-height: 1.08; font-weight: 700; letter-spacing: -.035em; margin: 0; }
+h1 .of { color: var(--faint); font-weight: 600; }
+.lede { font-size: 15px; line-height: 1.6; color: var(--ink-2); max-width: 72ch; margin: 10px 0 0; }
+.lede b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.lede .link { font-size: inherit; }
+.meta { margin-top: 8px; font-size: 12.5px; color: var(--faint); }
+
+/* Tabs */
+.tabs { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 86%, transparent); -webkit-backdrop-filter: saturate(1.6) blur(14px); backdrop-filter: saturate(1.6) blur(14px); }
+.tabs .wrap { display: flex; gap: 6px; }
+.tab { flex: 0 1 300px; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 11px; align-items: center;
+  padding: 11px 16px 10px 14px; margin-bottom: -1px; border: 0; border-bottom: 3px solid transparent; border-radius: 10px 10px 0 0;
+  background: none; cursor: pointer; text-align: left; transition: background .15s, border-color .15s; }
+.tab:hover { background: var(--hover); }
+.tab > .ico { grid-row: span 2; width: 20px; height: 20px; color: var(--faint); transition: color .15s; }
+.tab .lb { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; letter-spacing: -.01em; color: var(--ink); }
+.tab .c { font-size: 11.5px; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: var(--line); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tab .ds { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab:hover > .ico { color: var(--ink-2); }
+.tab.on { border-bottom-color: var(--accent); }
+.tab.on > .ico { color: var(--accent); }
+.tab.on .c { background: var(--accent); color: #fff; }
+.tabs.stuck .ds { display: none; }
+.tabs.stuck .tab { padding-top: 9px; padding-bottom: 8px; }
+.tabs.stuck .tab > .ico { grid-row: auto; width: 18px; height: 18px; }
+
+/* Keep exploring */
+.next { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); }
+.next h3 { margin-top: 0; }
+.next-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 32px; }
+.next-btn { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 14px; align-items: center; width: calc(100% + 24px);
+  margin: 0 -12px; padding: 12px; border: 0; border-radius: 10px; background: none; cursor: pointer; text-align: left; }
+.next-btn:hover { background: var(--hover); }
+.next-btn > .ico { grid-row: span 2; width: 22px; height: 22px; color: var(--accent); }
+.next-btn .lb { font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.next-btn .ds { color: var(--muted); font-size: 13px; }
+.next-btn .go { grid-row: 1 / span 2; grid-column: 3; color: var(--faint); transition: transform .15s, color .15s; }
+.next-btn:hover .go { color: var(--accent); transform: translateX(3px); }
+main { padding: 30px 0 72px; min-height: 60vh; }
+main.enter { animation: enter .22s ease-out; }
+@keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Sections */
+.sec + .sec { margin-top: 52px; }
+.sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; margin-bottom: 12px; }
+h2 { font-size: 18px; line-height: 1.25; font-weight: 680; letter-spacing: -.02em; margin: 0; }
+.sec-sub { color: var(--muted); margin: 2px 0 0; max-width: 70ch; }
+h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 28px 0 10px; }
+
+/* Highlights */
+.hk { display: grid; grid-template-columns: minmax(200px, 300px) minmax(0, 1fr); gap: 8px 48px; padding: 16px 0; border-top: 1px solid var(--line); }
+.hk:first-child { border-top: 0; padding-top: 4px; }
+.hk-title { display: flex; align-items: center; gap: 9px; font-size: 14.5px; font-weight: 640; letter-spacing: -.01em; }
+.hk-title .ico { color: var(--hl); width: 16px; height: 16px; }
+.hk-count { color: var(--hl); font-variant-numeric: tabular-nums; }
+.hk-note { color: var(--muted); font-size: 13px; margin: 2px 0 0 25px; }
+.hk-items { min-width: 0; }
+.row-btn { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto 14px; gap: 18px; align-items: baseline;
+  width: calc(100% + 24px); margin: 0 -12px; padding: 6px 12px; border: 0; border-radius: 7px; background: none;
+  text-align: left; cursor: pointer; }
+.row-btn:hover { background: var(--hover); }
+.row-btn .id { font-family: var(--mono); font-size: 12.5px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-btn .nm { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-btn .fig { font-variant-numeric: tabular-nums; font-weight: 620; white-space: nowrap; }
+.row-btn .go { color: var(--faint); opacity: 0; transform: translateX(-4px); transition: opacity .15s, transform .15s; align-self: center; }
+.row-btn:hover .go, .row-btn:focus-visible .go { opacity: 1; transform: none; color: var(--ink); }
+.row-btn .go .ico { width: 14px; height: 14px; }
+.row-btn.plain .id { font-family: var(--sans); font-size: 13.5px; }
+.more { color: var(--muted); font-size: 13px; padding: 6px 0 0; }
+.clear { display: flex; align-items: center; gap: 10px; font-size: 14.5px; color: var(--ink-2); }
+.clear .ico { color: var(--add); width: 22px; height: 22px; stroke-width: 2.2; }
+.inline-hl { margin: 28px 0 0; padding-left: 18px; border-left: 2px solid var(--hl); }
+.inline-hl .hk { grid-template-columns: 1fr; gap: 6px; padding: 0; border: 0; }
+.inline-hl .hk + .hk { margin-top: 18px; }
+
+/* Change overview */
+.legend-inline { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--muted); }
+.legend-inline span { display: inline-flex; align-items: center; gap: 7px; }
+.legend-inline i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.cf { display: grid; grid-template-columns: minmax(150px, 230px) minmax(80px, 1fr) 76px 76px 76px 14px; gap: 22px; align-items: center;
+  width: calc(100% + 24px); margin: 0 -12px; padding: 7px 12px; border: 0; border-radius: 7px; background: none; text-align: left; cursor: pointer; }
+.cf:hover { background: var(--hover); }
+.cf:hover .go { opacity: 1; transform: none; color: var(--ink); }
+.cf .go { color: var(--faint); opacity: 0; transform: translateX(-4px); transition: opacity .15s, transform .15s; }
+.cf .go .ico { width: 14px; height: 14px; }
+.cf .nm { font-family: var(--mono); font-size: 12.5px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cf .nm small { font-family: var(--sans); font-weight: 500; font-size: 12px; margin-left: 8px; }
+.cf .n { text-align: right; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.cf .n.z { color: var(--faint); }
+.bar { display: flex; gap: 2px; height: 7px; min-width: 0; }
+.bar i { display: block; height: 100%; border-radius: 2px; min-width: 3px; }
+.bar .a { background: var(--add); } .bar .d { background: var(--del); } .bar .m { background: var(--mod); }
+.bar .x { background: var(--line-2); }
+.cf-head { font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); cursor: default; padding-bottom: 6px; }
+.cf-head:hover { background: none; }
+.quiet { color: var(--muted); font-size: 13.5px; margin: 18px 0 0; max-width: 90ch; }
+.flink { border: 0; background: none; padding: 0; font: inherit; font-family: var(--mono); font-size: .92em; color: var(--ink-2); cursor: pointer; }
+.flink:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+/* Files */
+.files { display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: 40px; align-items: start; }
+.fnav { position: sticky; top: 60px; max-height: calc(100vh - 90px); overflow-y: auto; margin: -4px -8px 0; padding: 4px 8px 24px; }
+.fnav-h { font-size: 11px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); margin: 22px 4px 6px; }
+.fnav-h:first-of-type { margin-top: 14px; }
+.fn { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px; width: 100%; padding: 5px 10px;
+  border: 0; border-radius: 7px; background: none; text-align: left; cursor: pointer; color: var(--ink-2); }
+.fn:hover { background: var(--hover); color: var(--ink); }
+.fn.on { background: var(--accent-soft); color: var(--ink); }
+.fn .nm { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.fn.on .nm { font-weight: 650; }
+.fn .ct { margin-left: auto; font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; display: flex; gap: 6px; }
+.fn.q { color: var(--muted); padding-top: 4px; padding-bottom: 4px; }
+.fd { min-width: 0; }
+.fd-title { font: 650 20px/1.25 var(--mono); letter-spacing: -.02em; margin: 0; overflow-wrap: anywhere; }
+.fd-meta { color: var(--muted); margin: 4px 0 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.fd-meta .tag { font-weight: 650; }
+.kinds { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 22px 0 0; border-bottom: 1px solid var(--line); }
+.kind { position: relative; border: 0; background: none; cursor: pointer; padding: 0 0 9px; text-align: left; color: var(--muted); font-size: 12.5px; }
+.kind b { display: block; font-size: 21px; line-height: 1.15; font-weight: 680; letter-spacing: -.025em; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.kind:hover b { color: var(--ink); }
+.kind.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: currentColor; }
+.kind.on.k-added, .kind.on.k-added b { color: var(--add); }
+.kind.on.k-deleted, .kind.on.k-deleted b { color: var(--del); }
+.kind.on.k-modified, .kind.on.k-modified b { color: var(--mod); }
+.cols { display: grid; grid-template-columns: max-content minmax(60px, 260px) max-content max-content; gap: 0 18px; align-items: center; }
+.col { display: contents; cursor: pointer; }
+.col > * { padding: 4px 0; }
+.col .nm { font-family: var(--mono); font-size: 12px; padding-left: 10px; border-radius: 7px 0 0 7px; }
+.col .pct { padding-right: 10px; border-radius: 0 7px 7px 0; color: var(--muted); }
+.col:hover > * { background: var(--hover); }
+.col .bar { height: 100%; align-items: center; }
+.col .bar i { height: 6px; background: var(--mod); opacity: .7; }
+.col.on .nm { color: var(--accent); font-weight: 650; }
+.col.on .bar i { background: var(--accent); opacity: 1; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; margin: 18px 0 8px; }
+.count { color: var(--muted); font-size: 13px; }
+.count b { color: var(--ink); font-weight: 620; }
+.search { display: flex; align-items: center; gap: 8px; padding: 6px 13px; border-radius: 999px; background: var(--hover);
+  color: var(--faint); width: min(300px, 100%); transition: box-shadow .15s, background .15s; }
+.search:focus-within { background: var(--bg); box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 5px var(--accent-soft); color: var(--accent); }
+.search input { border: 0; background: none; outline: none; font: inherit; font-size: 13px; color: var(--ink); width: 100%; min-width: 0; }
+.search input::placeholder { color: var(--faint); }
+.search kbd { font: 11px var(--mono); color: var(--faint); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 5px; }
+.tablewrap { overflow-x: auto; margin: 0 -2px; padding: 0 2px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { font: 650 10.5px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); text-align: left;
+  padding: 8px 20px 8px 0; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+td { font-family: var(--mono); padding: 7px 20px 7px 0; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: top; }
+td.same { color: var(--faint); }
+td.ln { color: var(--faint); font-size: 11.5px; }
+td.ln.a { color: var(--add); } td.ln.d { color: var(--del); }
+tbody tr:hover td { background: var(--hover); }
+tbody tr:hover td:first-child { box-shadow: -8px 0 0 var(--hover); }
+tr.focus td { background: var(--hl-soft); }
+tr.focus td:first-child { box-shadow: -8px 0 0 var(--hl-soft), inset 2px 0 0 var(--hl); padding-left: 8px; }
+del { background: var(--del-soft); color: var(--del); text-decoration: line-through; text-decoration-thickness: 1px; padding: 1px 5px; border-radius: 4px; }
+ins { background: var(--add-soft); color: var(--add); text-decoration: none; padding: 1px 5px; border-radius: 4px; }
+.arrow { color: var(--faint); padding: 0 5px; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 16px 0 0; color: var(--muted); font-size: 13px; }
+.pg { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: none; cursor: pointer; color: var(--ink-2); }
+.pg:hover:not(:disabled) { background: var(--hover); }
+.pg:disabled { color: var(--faint); cursor: default; }
+.note { color: var(--ink-2); font-size: 13.5px; margin: 16px 0; padding-left: 14px; border-left: 2px solid var(--line-2); max-width: 80ch; }
+.fine { margin-top: 28px; font-size: 12.5px; color: var(--faint); max-width: 80ch; }
+.fine > div + div { margin-top: 4px; }
+.empty { color: var(--muted); padding: 32px 0; }
+
+/* Shapes */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 12.5px; color: var(--ink-2); }
+.legend > span { display: inline-flex; align-items: center; gap: 9px; }
+.sw { width: 26px; height: 10px; flex: none; overflow: visible; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin: 18px 0 22px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chipbtn { border: 0; background: none; cursor: pointer; padding: 5px 11px; border-radius: 999px; color: var(--muted); font-size: 13px; font-weight: 520; }
+.chipbtn:hover { color: var(--ink); background: var(--hover); }
+.chipbtn.on { background: var(--ink); color: var(--bg); }
+.chipbtn .c { margin-left: 6px; opacity: .6; font-variant-numeric: tabular-nums; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 30px 26px; }
+.thumb { border: 0; background: none; padding: 0; text-align: left; cursor: pointer; min-width: 0; }
+.thumb svg { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 12px; transition: background .18s; }
+.thumb:hover svg { background: var(--hover); }
+.thumb .tt { margin-top: 8px; font: 620 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumb .tm { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thumb .tm b { font-weight: 620; }
+.tag-changed { color: var(--mod); } .tag-added { color: var(--add); } .tag-deleted { color: var(--del); } .tag-redrawn, .tag-renamed { color: var(--ink-2); }
+.ln { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.ln.case { stroke: var(--casing); }
+.ln.same { stroke: var(--same); }
+.ln.old { stroke: var(--del); }
+.ln.new { stroke: var(--add); }
+.ln.link { stroke: var(--ink-2); }
+.dot { vector-effect: non-scaling-stroke; stroke: var(--casing); stroke-width: 1.5; }
+.dot.old { fill: var(--del); } .dot.new { fill: var(--add); } .dot.hollow { fill: var(--casing); stroke: var(--del); stroke-width: 2.5; }
+.halo { fill: var(--hl); fill-opacity: .13; stroke: var(--hl); stroke-opacity: .75; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }
+svg.hide-old .L-old, svg.hide-new .L-new, svg.hide-same .L-same { display: none; }
+
+/* Dialogs */
+dialog { border: 0; padding: 0; color: var(--ink); background: var(--bg); box-shadow: var(--shadow); }
+dialog::backdrop { background: rgba(10, 11, 14, .5); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+dialog[open] { animation: pop .18s ease-out; }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }
+.sheet { width: min(1480px, calc(100vw - 32px)); height: calc(100vh - 32px); max-width: none; max-height: none; border-radius: 16px; overflow: hidden; }
+.sheet[open] { display: flex; flex-direction: column; }
+.dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 12px 8px 20px; border-bottom: 1px solid var(--line); flex: none; }
+.dlg-title { min-width: 0; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.dlg-title .k { font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.dlg-title .t { font: 650 14.5px var(--mono); overflow-wrap: anywhere; }
+.dlg-title .s { color: var(--muted); }
+.dlg-nav { display: flex; align-items: center; gap: 2px; flex: none; color: var(--muted); font-size: 13px; }
+.dlg-nav .pos { padding: 0 8px; font-variant-numeric: tabular-nums; }
+.iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 0; border-radius: 9px;
+  background: none; cursor: pointer; color: var(--ink-2); }
+.iconbtn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+.iconbtn:disabled { color: var(--faint); cursor: default; }
+.iconbtn .ico { width: 18px; height: 18px; }
+.zoomwrap { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+.mapview { position: relative; min-height: 0; background-color: var(--map-bg);
+  background-image: radial-gradient(var(--grid) 1px, transparent 1.2px); background-size: 18px 18px; }
+.mapview > svg { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; user-select: none; }
+.mapview.notiles .tiles { display: none; }
+.tiles image { transition: opacity .2s; }
+.mapctl { position: absolute; display: flex; gap: 6px; }
+.mapctl.tl { left: 14px; top: 14px; flex-direction: column; }
+.mapctl.tc { left: 50%; top: 14px; transform: translateX(-50%); }
+.mapctl.tr { right: 14px; top: 14px; align-items: center; }
+.mbtn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 32px; height: 32px; padding: 0 9px; border: 0;
+  border-radius: 10px; background: var(--raised); color: var(--ink-2); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 4px 14px rgba(0,0,0,.10);
+  cursor: pointer; font-size: 12.5px; font-weight: 560; }
+.mbtn:hover { color: var(--ink); }
+.mbtn .ico { width: 15px; height: 15px; }
+.mbtn.off { color: var(--faint); }
+.seg { display: inline-flex; padding: 3px; border-radius: 11px; background: var(--raised); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 4px 14px rgba(0,0,0,.10); }
+.seg button { border: 0; background: none; cursor: pointer; padding: 5px 12px; border-radius: 8px; font-size: 12.5px; font-weight: 560; color: var(--muted); white-space: nowrap; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--ink); color: var(--bg); }
+.offline { display: none; font-size: 12px; color: var(--muted); background: var(--raised); padding: 5px 10px; border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+.mapview.is-offline:not(.notiles) .offline { display: inline-flex; }
+.scalebar { position: absolute; left: 14px; bottom: 12px; font-size: 11px; font-weight: 600; color: var(--ink-2); pointer-events: none;
+  text-shadow: 0 0 3px var(--casing), 0 0 3px var(--casing); }
+.scalebar i { display: block; height: 6px; border: 1.5px solid var(--ink-2); border-top: 0; margin-top: 2px; }
+.credit { position: absolute; right: 8px; bottom: 6px; font-size: 10.5px; color: var(--muted); text-shadow: 0 0 3px var(--casing), 0 0 3px var(--casing); }
+.mapview.notiles .credit, .mapview.is-offline .credit { display: none; }
+.mapinfo { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100% - 200px); padding: 8px 14px;
+  border-radius: 10px; background: var(--raised); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 6px 20px rgba(0,0,0,.14);
+  font-size: 12.5px; color: var(--ink-2); text-align: center; pointer-events: none; transition: opacity .2s; }
+.mapinfo:empty { opacity: 0; }
+.side { border-left: 1px solid var(--line); overflow-y: auto; padding: 20px 22px 28px; }
+.side h3 { margin: 24px 0 8px; }
+.side h3:first-child { margin-top: 0; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; font-size: 13px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 560; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.big { font-size: 27px; font-weight: 700; letter-spacing: -.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.big-sub { color: var(--muted); margin: 2px 0 18px; }
+.toggles { display: grid; gap: 2px; margin: 0 -10px; }
+.toggle { display: flex; align-items: center; gap: 12px; width: 100%; padding: 5px 10px; border: 0; border-radius: 7px; background: none;
+  cursor: pointer; text-align: left; font-size: 13px; color: var(--ink-2); }
+.toggle:hover { background: var(--hover); }
+.toggle .eye { margin-left: auto; color: var(--faint); }
+.toggle.off { color: var(--faint); }
+.toggle.off .sw { opacity: .3; }
+.toggle.static { cursor: default; }
+.toggle.static:hover { background: none; }
+.chg { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; width: calc(100% + 20px); margin: 0 -10px; padding: 7px 10px;
+  border: 0; border-radius: 7px; background: none; text-align: left; cursor: pointer; font-size: 12.5px; }
+.chg:hover { background: var(--hover); }
+.chg.on { background: var(--accent-soft); }
+.chg .l { font-weight: 560; }
+.chg .g { font-variant-numeric: tabular-nums; font-weight: 620; }
+.chg .d { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.chg .bar { grid-column: 1 / -1; height: 3px; margin-top: 4px; }
+.chg .bar i { border-radius: 2px; }
+.sheet.drawer { width: min(640px, 100vw); height: 100vh; margin: 0 0 0 auto; border-radius: 0; }
+.drawer .body { overflow-y: auto; padding: 8px 28px 40px; }
+.opt { padding: 13px 0; border-bottom: 1px solid var(--line); }
+.opt-h { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.opt-h .mono { font-weight: 620; font-size: 13px; }
+.opt-h .v { font-family: var(--mono); font-size: 12.5px; color: var(--accent); text-align: right; }
+.opt p { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+footer { border-top: 1px solid var(--line); padding: 22px 0 32px; color: var(--faint); font-size: 12px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 28px; justify-content: space-between; }
+
+@media (max-width: 900px) {
+  .wrap { padding: 0 20px; }
+  .hk { grid-template-columns: 1fr; gap: 10px; }
+  .hk-note { margin-left: 28px; }
+  .files { grid-template-columns: 1fr; gap: 28px; }
+  .fnav { position: static; max-height: none; margin: 0; padding: 0; }
+  .cf { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px 14px; }
+  .cf-head { display: none; }
+  .cf .bar { grid-column: 1 / -1; grid-row: 2; }
+  .cf .go { display: none; }
+  .zoomwrap { grid-template-columns: 1fr; grid-template-rows: 58vh auto; overflow-y: auto; }
+  .side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .sheet { width: 100vw; height: 100vh; border-radius: 0; }
+  .mapctl.tc { top: auto; bottom: 44px; }
+  .mapinfo { max-width: calc(100% - 32px); bottom: 88px; }
+}
+@media (max-width: 560px) {
+  body { font-size: 14.5px; }
+  .wrap { padding: 0 16px; }
+  .hero { padding-top: 24px; padding-bottom: 32px; }
+  .lede { font-size: 16px; }
+  .tabs .wrap { gap: 0; }
+  .tab { flex: 1 1 0; padding: 10px 8px 9px; column-gap: 7px; }
+  .tab .ds { display: none; }
+  .tab > .ico { grid-row: auto; width: 17px; height: 17px; }
+  .tab .lb { font-size: 14px; gap: 6px; }
+  .rel-arrow { display: none; }
+  .dlg-head { padding-left: 16px; }
+  .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 16px; }
+  .row-btn { grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto; }
+  .row-btn .go { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media print { .tabs, .actions, footer { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap topbar">
+  <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="18" r="2.6" fill="var(--del)"/><circle cx="19" cy="6" r="2.6" fill="var(--add)"/><path d="M5 18c6 0 4-12 14-12" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round"/></svg>GTFS diff</div>
+  <div class="actions">
+    <button class="ghost" id="btn-settings" type="button"></button>
+  </div>
+</div>
+<header class="wrap hero" id="hero"></header>
+<nav class="tabs" aria-label="Sections"><div class="wrap" id="tabs"></div></nav>
+<main><div class="wrap" id="main"></div></main>
+<footer><div class="wrap" id="foot"></div></footer>
+<dialog id="zoom" class="sheet" aria-labelledby="zoom-title">
+  <div class="dlg-head"><div class="dlg-title" id="zoom-title"></div><div class="dlg-nav" id="zoom-nav"></div></div>
+  <div id="zoom-body" class="zoomwrap"></div>
+</dialog>
+<dialog id="settings" class="sheet drawer" aria-labelledby="settings-title">
+  <div class="dlg-head"><div class="dlg-title"><span class="t" id="settings-title" style="font-family:var(--sans)">Settings used</span></div><div class="dlg-nav" id="settings-nav"></div></div>
+  <div class="body" id="settings-body"></div>
+</dialog>
+<script id="data" type="application/json">/*DATA*/null</script>
+<script>
+"use strict";
+const D = JSON.parse(document.getElementById("data").textContent);
+
+// Packed by shape_points.pack; older reports hold plain lists.
+function unpack(a) {
+  if (!Array.isArray(a) || !a.length || Array.isArray(a[0])) return a || [];
+  const out = [];
+  let x = 0, y = 0, s = 0;
+  for (let i = 0; i < a.length; i += 5) {
+    x += a[i]; y += a[i + 1]; s += a[i + 2];
+    const f = a[i + 3], g = a[i + 4];
+    out.push([x / 1e6, y / 1e6, Math.round(s * 1e6) / 1e6, f & 1, g < 0 ? null : g / 10, (f >> 1) & 1]);
+  }
+  return out;
+}
+if (D.shapes) for (const i of D.shapes.items) { i.base_coords = unpack(i.base_coords); i.new_coords = unpack(i.new_coords); }
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v; else if (k.startsWith("on")) n[k] = v; else n.setAttribute(k, v);
+  }
+  for (const k of kids.flat(Infinity)) if (k != null && k !== false) n.append(k.nodeType ? k : String(k));
+  return n;
+};
+const kidsOf = kids => kids.flat(Infinity).filter(k => k != null && k !== false).map(k => k.nodeType ? k : String(k));
+const put = (n, ...kids) => { n.append(...kidsOf(kids)); return n; };
+const swap = (n, ...kids) => { n.replaceChildren(...kidsOf(kids)); return n; };
+const sv = (tag, attrs) => {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null) n.setAttribute(k, v);
+  return n;
+};
+const ICONS = {
+  arrow: "M5 12h14M13 6l6 6-6 6",
+  left: "M15 6l-6 6 6 6", right: "M9 6l6 6-6 6", close: "M6 6l12 12M18 6L6 18",
+  plus: "M12 5v14M5 12h14", minus: "M5 12h14",
+  fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  map: "M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14",
+  search: "M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM20 20l-4.8-4.8",
+  check: "M4.5 12.5l5 5L19.5 7",
+  calendarX: "M4 6.5h16V20H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4M10 13.5l4 4M14 13.5l-4 4",
+  calendarOff: "M4 6.5h16V20H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4M9 15.5h6",
+  pinX: "M12 21s-6.5-5.6-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21zM10 7.8l4 4M14 7.8l-4 4",
+  pinMove: "M9 21s-5.5-4.8-5.5-9.5a5.5 5.5 0 0 1 11 0C14.5 16.2 9 21 9 21zM9 11.5h.01M15.5 5.5h5M18.5 3l2.5 2.5-2.5 2.5",
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  file: "M14 3H6v18h12V7zM14 3v4h4M9 12.5h6M9 16.5h6",
+  route: "M6 19.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM8.2 15.6C12 13 9 9.6 15.6 8.2",
+  sliders: "M4 7h10M18 7h2M4 17h4M12 17h8M16 4.5v5M10 14.5v5",
+  eye: "M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
+  eyeOff: "M3 3l18 18M10.6 5.6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.7 3.4M6.6 6.6C3.9 8.3 2.5 12 2.5 12s3.5 6.5 9.5 6.5a9 9 0 0 0 4.4-1.1",
+};
+const icon = name => { const s = sv("svg", { viewBox: "0 0 24 24", class: "ico", "aria-hidden": "true" }); s.append(sv("path", { d: ICONS[name] })); return s; };
+const fmt = n => n == null ? "–" : Number(n).toLocaleString("en-US");
+const plural = (n, w, ws) => `${fmt(n)} ${n === 1 ? w : ws || w + "s"}`;
+const metres = m => m == null ? "–" : m >= 1000 ? `${(m / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 })} km`
+  : m < 10 ? `${(Math.round(m * 10) / 10).toLocaleString("en-US")} m` : `${fmt(Math.round(m))} m`;
+const duration = sec => {
+  if (sec < 10) return `${sec.toFixed(1)} s`;
+  const t = Math.round(sec);
+  return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${String(t % 60).padStart(2, "0")} s`;
+};
+const dateFmt = (d, opts) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", ...opts });
+const sum = a => a.reduce((x, y) => x + (y || 0), 0);
+const go = () => el("span", { class: "go" }, icon("arrow"));
+
+const state = { tab: "overview", file: null, part: null, col: null, shape: "all", page: 0, view: null, all: false,
+  q: "", shapeQ: "", fileQ: "", focus: null, map: null, whole: false, tiles: true, hidden: {} };
+const PAGE_SIZE = 10;
+try { state.tiles = localStorage.getItem("gtfs-diff-tiles") !== "off"; } catch (e) { /* storage blocked */ }
+
+const UNSUPPORTED = (D.metadata.unsupported_files || []).map(f => ({ name: f.file_name, action: "unsupported",
+  present_in: f.present_in, stats: {}, columns_added: [], columns_deleted: [], ignored: [] }));
+const ALL_FILES = [...D.files, ...UNSUPPORTED];
+const changedFiles = D.files.filter(f => f.action !== "unchanged" && f.action !== "not_compared");
+const quietFiles = D.files.filter(f => f.action === "unchanged");
+const skippedFiles = [...D.files.filter(f => f.action === "not_compared"), ...UNSUPPORTED];
+state.file = (changedFiles[0] || ALL_FILES[0] || {}).name || null;
+const totals = {
+  added: sum(D.files.map(f => (f.stats || {}).rows_added_count)),
+  deleted: sum(D.files.map(f => (f.stats || {}).rows_deleted_count)),
+  modified: sum(D.files.map(f => (f.stats || {}).rows_modified_count)),
+};
+const highlightTotal = D.highlight_counts ? sum(Object.values(D.highlight_counts)) : 0;
+
+// Mobility Database names (mdb-ID-YYYYMMDDHHMM) carry the release date.
+function release(src) {
+  const parts = String(src || "").replace(/\/+$/, "").split("/");
+  let name = parts[parts.length - 1];
+  if (name === "extracted" && parts.length > 1) name = parts[parts.length - 2];
+  const m = name.match(/^mdb-(\d+)-(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})/);
+  return { name: m ? name.replace(/\.zip$/i, "") : name, src, feed: m ? `mdb-${m[1]}` : null, date: m ? new Date(+m[2], +m[3] - 1, +m[4]) : null };
+}
+
+
+/* ---------- Header ---------- */
+function header() {
+  const m = D.metadata, s = D.summary;
+  const base = release(m.base_feed.source), next = release(m.new_feed.source);
+  const relEl = (k, r) => el("div", { class: "rel", title: r.src },
+    el("span", { class: "rel-k" }, k),
+    r.date ? el("span", { class: "rel-d" }, dateFmt(r.date)) : null,
+    el("span", { class: r.date ? "rel-n" : "rel-d mono" }, r.name));
+  const lede = [];
+  const parts = [[totals.added, "added", "t-add"], [totals.deleted, "deleted", "t-del"], [totals.modified, "modified", "t-mod"]].filter(([n]) => n);
+  if (parts.length) {
+    parts.forEach(([n, w, c], i) => {
+      if (i) lede.push(i === parts.length - 1 ? " and " : ", ");
+      lede.push(el("b", { class: c }, fmt(n)), i ? ` ${w}` : ` ${n === 1 ? "row" : "rows"} ${w}`);
+    });
+    lede.push(". ");
+  }
+  const fileParts = [[changedFiles.length, "changed"], [quietFiles.length, "with no changes"], [skippedFiles.length, "not compared"]].filter(([n]) => n);
+  if (fileParts.length) {
+    lede.push(fileParts.map(([n, w], i) => `${i ? fmt(n) : plural(n, "file")} ${w}`).join(", ").replace(/, ([^,]*)$/, " and $1") + ". ");
+  }
+  if (D.highlight_counts) {
+    lede.push(highlightTotal
+      ? el("button", { class: "link", onclick: () => { setTab("overview"); document.getElementById("checks").scrollIntoView({ behavior: "smooth", block: "start" }); } },
+        plural(highlightTotal, "notable highlight"), icon("arrow"))
+      : "No notable highlights.");
+  }
+  document.getElementById("hero").append(
+    el("div", { class: "releases" }, relEl("Base", base), el("span", { class: "rel-arrow" }, icon("arrow")), relEl("New", next)),
+    el("h1", { id: "headline" }, s.total_changes ? [fmt(s.total_changes), " ", s.total_changes === 1 ? "change" : "changes"] : "No changes"),
+    el("p", { class: "lede" }, lede),
+    el("div", { class: "meta" }, `Generated ${new Date(m.generated_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`,
+      m.duration_seconds == null ? "" : ` · compared in ${duration(m.duration_seconds)}`));
+  document.title = `${base.feed ? base.feed + " · " : ""}${s.total_changes ? fmt(s.total_changes) + " changes" : "No changes"} · GTFS diff`;
+  document.getElementById("foot").append(
+    el("span", {}, `GTFS diff schema ${m.schema_version || ""}`.trim()));
+  settings();
+}
+
+// Rows from report/html.py settings_rows.
+function settings() {
+  const btn = document.getElementById("btn-settings");
+  if (!D.settings) { btn.remove(); return; }
+  btn.append(icon("sliders"), "Settings used");
+  const dlg = document.getElementById("settings");
+  btn.onclick = () => dlg.showModal();
+  document.getElementById("settings-nav").append(el("button", { class: "iconbtn", "aria-label": "Close", onclick: () => dlg.close() }, icon("close")));
+  dlg.addEventListener("click", e => { if (e.target === dlg) dlg.close(); });
+  put(document.getElementById("settings-body"), D.settings.map(([k, v, what]) => el("div", { class: "opt" },
+    el("div", { class: "opt-h" }, el("span", { class: "mono" }, k), el("span", { class: "v" }, v)), el("p", {}, what))));
+}
+
+/* ---------- Notable highlights ---------- */
+const HIGHLIGHT_KINDS = {
+  service_periods_do_not_overlap: ["Service periods do not overlap", "calendarX"],
+  service_day_without_trips: ["Days that lost all their trips", "calendarOff"],
+  stop_removed: ["Stops removed", "pinX"],
+  stop_moved: ["Stops moved", "pinMove"],
+  shape_moved: ["Shapes moved", "route"],
+};
+
+function refId(h, file, feed) {
+  const r = (h.references || []).find(r => r.file_name === file && r.feed === feed);
+  return r ? Object.values(r.identifier)[0] : undefined;
+}
+
+// Base and new references: modified; base only: deleted; new only: added.
+function highlightRow(h) {
+  const refs = h.references || [];
+  if (!refs.length) return null;
+  const file = refs[0].file_name;
+  const base = refId(h, file, "base"), next = refId(h, file, "new");
+  const part = base != null && next != null ? "modified" : base != null ? "deleted" : "added";
+  return { file, part, key: base ?? next };
+}
+
+const shapeOf = h => D.shapes && D.shapes.items.find(i => i.base === refId(h, "shapes.txt", "base") && i.new === refId(h, "shapes.txt", "new"));
+const stopPlace = h => {
+  const d = h.details || {};
+  if (h.code === "stop_moved" && d.base && d.new) return { base: d.base, new: d.new };
+  return null;
+};
+
+function openHighlight(h, siblings) {
+  if (h.code === "shape_moved" && shapeOf(h)) {
+    const list = (siblings || [h]).map(shapeOf).filter(Boolean).map(item => ({ item }));
+    openMap(list, list.findIndex(e => e.item === shapeOf(h)));
+    return;
+  }
+  if (stopPlace(h)) {
+    const list = (siblings || [h]).filter(stopPlace).map(x => ({ stop: x }));
+    openMap(list, list.findIndex(e => e.stop === h));
+    return;
+  }
+  showRow(h);
+}
+
+function showRow(h) {
+  const row = highlightRow(h);
+  const present = n => D.files.find(f => f.name === n);
+  const file = row && present(row.file) ? row.file
+    : h.files.find(n => present(n) && present(n).action !== "unchanged") || h.files.find(present);
+  if (!file) return;
+  state.file = file; state.col = null; state.q = "";
+  state.part = row && file === row.file ? row.part : null;
+  state.focus = row && file === row.file ? row : null;
+  setTab("files");
+}
+
+function highlightRowText(h) {
+  const d = h.details || {};
+  const ids = file => {
+    const base = refId(h, file, "base"), next = refId(h, file, "new");
+    return base != null && next != null && base !== next ? `${base} → ${next}` : base ?? next ?? "";
+  };
+  const day = (iso, year) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US",
+    { weekday: "short", month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) });
+  if (h.code === "service_periods_do_not_overlap") {
+    const span = (a, b) => `${day(a)} – ${day(b, true)}`;
+    return [`Old ${span(d.base_first, d.base_last)}`, `new ${span(d.new_first, d.new_last)}`, d.gap_days ? `${plural(d.gap_days, "day")} apart` : "back to back"];
+  }
+  if (h.code === "service_day_without_trips") {
+    const when = d.date_from === d.date_to ? day(d.date_from, true) : `${day(d.date_from)} – ${day(d.date_to, true)}`;
+    const trips = d.base_trips_min === d.base_trips_max ? fmt(d.base_trips_max) : `${fmt(d.base_trips_min)}–${fmt(d.base_trips_max)}`;
+    return [when, `had ${trips} trips${d.days > 1 ? " a day" : ""}`, plural(d.days, "day")];
+  }
+  if (h.code === "stop_removed") return [ids("stops.txt"), d.stop_name || "", d.base_trips ? plural(d.base_trips, "trip") : ""];
+  if (h.code === "stop_moved") return [ids("stops.txt"), d.stop_name || "", metres(d.distance_m)];
+  if (h.code === "shape_moved") return [ids("shapes.txt"), d.route ? `route ${d.route}` : "", metres(d.distance_m)];
+  const r = (h.references || [])[0];
+  return [r ? Object.values(r.identifier)[0] : "", h.message, ""];
+}
+
+function highlightKindNote(kind) {
+  const P = D.highlight_parameters || {};
+  return {
+    service_periods_do_not_overlap: "The two releases have no day of service in common.",
+    service_day_without_trips: "Days in the new release with no trips at all, which had trips before.",
+    stop_removed: `Gone from the new release, with no new stop within ${fmt(D.constants.stop_replacement_m)} m to replace it.`,
+    stop_moved: `Moved at least ${fmt(P.stop_moved_m)} m. Open one to see it on a map.`,
+    shape_moved: `Moved at least ${fmt(P.shape_moved_m)} m somewhere along the line. Open one to see it on a map.`,
+  }[kind] || "";
+}
+
+function highlightList(items, counts) {
+  const kinds = [...new Set([...Object.keys(HIGHLIGHT_KINDS), ...items.map(h => h.code)])].filter(k => items.some(h => h.code === k));
+  return kinds.map(kind => {
+    const shown = items.filter(h => h.code === kind);
+    const total = counts ? counts[kind] || shown.length : shown.length;
+    const [title, ic] = HIGHLIGHT_KINDS[kind] || [kind.replaceAll("_", " "), "check"];
+    const dates = kind === "service_day_without_trips" || kind === "service_periods_do_not_overlap";
+    return el("div", { class: "hk" },
+      el("div", {}, el("div", { class: "hk-title" }, icon(ic), el("span", {}, title), el("span", { class: "hk-count" }, fmt(total))),
+        el("div", { class: "hk-note" }, highlightKindNote(kind))),
+      el("div", { class: "hk-items" }, shown.map(h => {
+        const [id, name, figure] = highlightRowText(h);
+        return el("button", { class: "row-btn" + (dates ? " plain" : ""), title: h.message, onclick: () => openHighlight(h, shown) },
+          el("span", { class: "id" }, id), el("span", { class: "nm" }, name), el("span", { class: "fig" }, figure), go());
+      }), total > shown.length ? el("div", { class: "more" }, `and ${fmt(total - shown.length)} more in the JSON report`) : null));
+  });
+}
+
+/* ---------- Overview ---------- */
+function overviewTab() {
+  const out = [];
+  if (D.highlights != null) {
+    const sec = el("section", { class: "sec", id: "checks" },
+      el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "Notable highlights"),
+        el("p", { class: "sec-sub" }, highlightTotal ? "Changes that riders would notice. Open one to see it on a map or in its file." : null))));
+    if (!D.highlights.length) {
+      sec.append(el("p", { class: "clear" }, icon("check"), "No notable highlights: no stop removed or moved far, no day that lost its service and no shape that moved."));
+    } else put(sec, highlightList(D.highlights, D.highlight_counts));
+    out.push(sec);
+  }
+  out.push(changesSection());
+  const teaser = shapeTeaser();
+  if (teaser) out.push(teaser);
+  return out;
+}
+
+function fileCounts(f) {
+  const s = f.stats || {};
+  return [s.rows_added_count || 0, s.rows_deleted_count || 0, s.rows_modified_count || 0];
+}
+
+function stackBar(f, max) {
+  const [a, d, m] = fileCounts(f);
+  const w = n => `${(n / max) * 100}%`;
+  if (!a && !d && !m) return el("span", { class: "bar" }, el("i", { class: "x", style: "width:3px" }));
+  return el("span", { class: "bar" },
+    a ? el("i", { class: "a", style: `width:${w(a)}`, title: `${fmt(a)} added` }) : null,
+    d ? el("i", { class: "d", style: `width:${w(d)}`, title: `${fmt(d)} deleted` }) : null,
+    m ? el("i", { class: "m", style: `width:${w(m)}`, title: `${fmt(m)} modified` }) : null);
+}
+
+const ACTION_NOTE = { added: "new file", deleted: "file removed", not_compared: "not compared" };
+
+function changesSection() {
+  const sec = el("section", { class: "sec" },
+    el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "Where the changes are"),
+      el("p", { class: "sec-sub" }, "Rows added, deleted and modified in each file. Open a file to read its rows.")),
+    el("div", { class: "legend-inline" }, el("span", {}, el("i", { style: "background:var(--add)" }), "Added"),
+      el("span", {}, el("i", { style: "background:var(--del)" }), "Deleted"), el("span", {}, el("i", { style: "background:var(--mod)" }), "Modified"))));
+  if (!changedFiles.length) {
+    sec.append(el("p", { class: "clear" }, icon("check"), "Every file is the same in both releases."));
+  } else {
+    const max = Math.max(1, ...changedFiles.map(f => sum(fileCounts(f))));
+    const sorted = [...changedFiles].sort((x, y) => sum(fileCounts(y)) - sum(fileCounts(x)));
+    sec.append(el("div", { class: "cf cf-head", "aria-hidden": "true" }, el("span", {}, "File"), el("span", {}),
+      el("span", { class: "n" }, "Added"), el("span", { class: "n" }, "Deleted"), el("span", { class: "n" }, "Modified"), el("span", {})));
+    put(sec, sorted.map(f => {
+      const [a, d, m] = fileCounts(f);
+      const n = (v, c, sign) => el("span", { class: "n " + (v ? c : "z") }, v ? sign + fmt(v) : "–");
+      return el("button", { class: "cf", onclick: () => openFile(f.name) },
+        el("span", { class: "nm" }, f.name, ACTION_NOTE[f.action] ? el("small", { class: f.action === "not_compared" ? "t-hl" : "muted" }, ACTION_NOTE[f.action]) : null),
+        stackBar(f, max), n(a, "t-add", "+"), n(d, "t-del", "−"), n(m, "t-mod", "~"), go());
+    }));
+  }
+  const names = files => files.map((f, i) => [i ? (i === files.length - 1 ? " and " : ", ") : "",
+    el("button", { class: "flink", onclick: () => openFile(f.name) }, f.name)]);
+  if (quietFiles.length) sec.append(el("p", { class: "quiet" }, "No changes in ", names(quietFiles), "."));
+  if (skippedFiles.length) sec.append(el("p", { class: "quiet" }, "Not compared: ", names(skippedFiles), skippedFiles.length === 1 ? ". Open it to see why." : ". Open one to see why."));
+  return sec;
+}
+
+const SHAPE_ORDER = ["changed", "redrawn", "added", "deleted", "renamed"];
+const SHAPE_LABEL = { changed: "Moved", redrawn: "Edited", added: "Added", deleted: "Deleted", renamed: "Renamed" };
+const MOVED_M = (D.highlight_parameters || {}).shape_moved_m ?? (D.metadata.parameters || {}).highlight_shape_moved_m;
+const SHAPE_FILTER = { changed: `Moved ${fmt(MOVED_M)} m or more`, redrawn: `Edited, under ${fmt(MOVED_M)} m`, added: "Added", deleted: "Deleted", renamed: "Renamed only" };
+const byChange = (x, y) => SHAPE_ORDER.indexOf(x.change) - SHAPE_ORDER.indexOf(y.change) || (y.dev ?? -1) - (x.dev ?? -1);
+
+function shapeTeaser() {
+  const S = D.shapes;
+  if (!S || !S.items.length) return null;
+  const total = sum(SHAPE_ORDER.filter(k => k !== "renamed").map(k => S.counts[k]));
+  const top = [...S.items].sort(byChange).slice(0, 4);
+  return el("section", { class: "sec" },
+    el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "Shapes that changed most"),
+      el("p", { class: "sec-sub" }, "Old line against new. Open one to explore it on a street map.")),
+      el("button", { class: "link", onclick: () => { state.shape = "all"; setTab("shapes"); } }, `All ${plural(total, "changed shape")}`, icon("arrow"))),
+    el("div", { style: "margin-bottom:22px" }, shapeLegend()),
+    el("div", { class: "gallery" }, top.map(i => thumb(i, top))));
+}
+
+/* ---------- Files ---------- */
+function openFile(name) {
+  state.file = name; state.part = null; state.col = null; state.q = "";
+  setTab("files");
+}
+
+function fileEntry(f) {
+  const [a, d, m] = fileCounts(f);
+  const counts = f.action === "modified" ? [a ? el("span", { class: "t-add" }, "+" + fmt(a)) : null,
+    d ? el("span", { class: "t-del" }, "−" + fmt(d)) : null, m ? el("span", { class: "t-mod" }, "~" + fmt(m)) : null]
+    : f.action === "unchanged" ? [] : f.action === "unsupported" ? [el("span", { class: "muted" }, "not GTFS")]
+    : [el("span", { class: f.action === "added" ? "t-add" : f.action === "deleted" ? "t-del" : "t-hl" }, ACTION_NOTE[f.action] || f.action)];
+  return el("button", { class: "fn" + (f.action === "unchanged" || f.action === "unsupported" ? " q" : "") + (f.name === state.file ? " on" : ""), "aria-current": f.name === state.file ? "true" : null,
+    onclick: () => { state.file = f.name; state.part = null; state.col = null; state.q = ""; render(); window.scrollTo({ top: Math.min(scrollY, document.querySelector(".tabs").offsetTop) }); } },
+    el("span", { class: "nm" }, f.name), el("span", { class: "ct" }, counts));
+}
+
+function filesTab() {
+  if (!ALL_FILES.length) return el("div", { class: "empty" }, "No files were compared.");
+  const group = (label, files) => files.length ? [el("div", { class: "fnav-h" }, `${label} · ${files.length}`), files.map(fileEntry)] : null;
+  const nav = el("nav", { class: "fnav", "aria-label": "Files" },
+    group("Changed", changedFiles), group("No changes", quietFiles), group("Not compared", skippedFiles));
+  return el("div", { class: "files" }, nav, fileDetail(ALL_FILES.find(f => f.name === state.file) || ALL_FILES[0]));
+}
+
+function fileHighlights(f) {
+  const items = (D.highlights || []).filter(h => h.files.includes(f.name));
+  if (!items.length) return null;
+  const kinds = new Set(items.map(h => h.code));
+  const counts = Object.fromEntries(Object.entries(D.highlight_counts || {}).filter(([k]) => kinds.has(k)));
+  return el("div", { class: "inline-hl" }, highlightList(items, counts));
+}
+
+function fileDetail(f) {
+  const s = f.stats || {};
+  const p = el("section", { class: "fd" }, el("h2", { class: "fd-title" }, f.name));
+  const fine = [];
+  const done = () => { if (fine.length) p.append(el("div", { class: "fine" }, fine.map(e => el("div", {}, e)))); return p; };
+  if (f.action === "unsupported") {
+    const where = { both: "In both releases", base: "Only in the old release", new: "Only in the new release" }[f.present_in];
+    p.append(el("p", { class: "fd-meta" }, el("span", { class: "tag t-hl" }, "Not compared"), where ? el("span", {}, where) : null),
+      el("div", { class: "note" }, "Not a GTFS file, so the diff does not read it."));
+    return done();
+  }
+  if (f.action === "unchanged") {
+    p.append(el("p", { class: "fd-meta" }, el("span", {}, `Compared row by row: ${plural(s.total_rows_base, "row")} in each release, and nothing differs.`)));
+    put(p, fileHighlights(f));
+    return done();
+  }
+  const what = { modified: ["Modified", "t-mod"], added: ["New file", "t-add"], deleted: ["File removed", "t-del"], not_compared: ["Not compared", "t-hl"] }[f.action] || [f.action, ""];
+  p.append(el("p", { class: "fd-meta" }, el("span", { class: "tag " + what[1] }, what[0]),
+    s.total_rows_base != null || s.total_rows_new != null ? el("span", { class: "num" }, `${fmt(s.total_rows_base)} → ${fmt(s.total_rows_new)} rows`) : null,
+    s.rows_changed_percentage != null ? el("span", { class: "num" }, `${s.rows_changed_percentage}% of rows changed`) : null));
+  put(p, fileHighlights(f));
+  if (f.reason) p.append(el("div", { class: "note" }, f.reason));
+  if (f.columns_added.length) p.append(el("div", { class: "note" }, "Columns added: ", el("span", { class: "mono t-add" }, f.columns_added.join(", "))));
+  if (f.columns_deleted.length) p.append(el("div", { class: "note" }, "Columns deleted: ", el("span", { class: "mono t-del" }, f.columns_deleted.join(", "))));
+  for (const i of f.ignored) p.append(el("div", { class: "note" }, el("span", { class: "mono" }, i.column), " ignored: ", i.message));
+  const countsOnly = (D.metadata.parameters || {}).row_changes_cap_per_file === 0;
+  if (countsOnly && (s.rows_added_count || s.rows_deleted_count || s.rows_modified_count)) {
+    p.append(el("div", { class: "note" }, "Rows are not in this report: the diff was run with --cap 0, which keeps only the counts",
+      f.columns ? " and the rows behind notable highlights" : "", `. Run without --cap, or with a cap of at least ${fmt(D.constants.min_cap)}, to see them.`));
+  }
+  const parts = [["modified", s.rows_modified_count], ["added", s.rows_added_count], ["deleted", s.rows_deleted_count]].filter(([, n]) => n);
+  if (!f.columns || !parts.length) return done();
+  if (!parts.some(([k]) => k === state.part)) state.part = parts[0][0];
+  p.append(el("div", { class: "kinds", role: "tablist" }, parts.map(([k, n]) =>
+    el("button", { class: `kind k-${k}` + (k === state.part ? " on" : ""), role: "tab", "aria-selected": String(k === state.part),
+      onclick: () => { state.part = k; state.col = null; render(); } }, el("b", {}, fmt(n)), `rows ${k}`))));
+  if (state.part === "modified" && s.column_stats && s.column_stats.length) {
+    const pick = c => () => { state.col = state.col === c.column ? null : c.column; render(); };
+    p.append(el("h3", {}, "Columns that changed"),
+      el("div", { class: "cols" }, s.column_stats.map(c => el("div", {
+        class: "col" + (c.column === state.col ? " on" : ""), role: "button", tabindex: "0", title: `Show only rows where ${c.column} changed`, onclick: pick(c),
+        onkeydown: e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(c)(); } } },
+        el("span", { class: "nm" }, c.column),
+        el("span", { class: "bar" }, el("i", { style: `width:${Math.max(1, c.modifications_percentage)}%` })),
+        el("span", { class: "num" }, fmt(c.modifications_count)),
+        el("span", { class: "num pct" }, `${c.modifications_percentage}%`)))));
+  }
+  let rows = f[state.part];
+  const total = s["rows_" + state.part + "_count"];
+  const count = el("div", { class: "count" });
+  if (state.part === "modified" && state.col) {
+    rows = f.modified.filter(r => state.col in r.changes).slice(0, D.caps.rows);
+    const matching = (s.column_stats.find(c => c.column === state.col) || {}).modifications_count || 0;
+    count.append(el("b", {}, el("span", { class: "mono" }, state.col), ` changed in ${fmt(matching)} rows`), " · ",
+      el("button", { class: "link", onclick: () => { state.col = null; render(); } }, "Show every column"));
+  } else if (state.part === "modified") rows = f.modified.slice(0, f.modified_first);
+  const q = state.q.trim().toLowerCase();
+  if (q) rows = rows.filter(r => JSON.stringify(Array.isArray(r) ? r[1] : [r.values, r.changes, r.new_id]).toLowerCase().includes(q));
+  if (!(state.part === "modified" && state.col)) {
+    count.append(q ? el("span", {}, el("b", {}, fmt(rows.length)), ` matching “${state.q.trim()}”`)
+      : el("span", {}, rows.length < total ? ["Showing ", el("b", {}, fmt(rows.length)), ` of ${fmt(total)}`] : [el("b", {}, fmt(total)), ` ${total === 1 ? "row" : "rows"}`]));
+  }
+  const search = el("label", { class: "search" }, icon("search"),
+    el("input", { id: "rowq", type: "search", placeholder: "Find in these rows", value: state.q, "aria-label": "Find in these rows",
+      oninput: e => { state.q = e.target.value; state.page = 0; render(); } }), state.q ? null : el("kbd", {}, "/"));
+  p.append(el("div", { class: "toolbar" }, count, search));
+  if (state.part === "modified" && state.col && !f.modified.some(r => state.col in r.changes)) {
+    p.append(el("div", { class: "note" }, `The JSON holds ${fmt(f.modified_in_json)} of the ${fmt(total)} modified rows (the first ones in the file, because of --cap), `,
+      `and none of them changes ${state.col}. Run with a higher --cap, or none, to see these rows.`));
+    return done();
+  }
+  if (!rows.length) { p.append(el("div", { class: "empty" }, q ? "No row here matches. Only the rows on this page are searched." : "No rows.")); return done(); }
+  if ((f[state.part] || []).length < total && !countsOnly) {
+    fine.push(`This page holds up to ${fmt(D.caps.rows)} rows of each kind per file, and per changed column; the JSON report holds up to its own cap. Find searches only the rows on this page.`);
+  }
+  const view = `${f.name}|${state.part}|${state.col}|${q}`;
+  if (state.view !== view) { state.view = view; state.page = 0; }
+  const focus = state.focus && state.focus.file === f.name && state.focus.part === state.part ? state.focus.key : null;
+  const isFocus = row => {
+    if (focus == null) return false;
+    if (Array.isArray(row)) return row[1][f.columns.indexOf(f.primary_key[0])] === focus;
+    return row.id[f.primary_key[0]] === focus;
+  };
+  if (focus != null) {
+    const at = rows.findIndex(isFocus);
+    if (at >= 0) { state.page = Math.floor(at / PAGE_SIZE); state.all = false; }
+    else p.append(el("div", { class: "note" }, `Row ${focus} is not on this page.`));
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  state.page = Math.min(state.page, pages - 1);
+  const shown = state.all ? rows : rows.slice(state.page * PAGE_SIZE, (state.page + 1) * PAGE_SIZE);
+  p.append(state.part === "modified" ? modifiedTable(f, shown, isFocus) : rowsTable(f, state.part, shown, isFocus));
+  if (rows.length > PAGE_SIZE) {
+    const to = n => () => { state.page = n; render(); };
+    const first = state.page * PAGE_SIZE + 1;
+    p.append(el("div", { class: "pager" }, state.all
+      ? [`All ${fmt(rows.length)} rows`, el("button", { class: "link", onclick: () => { state.all = false; render(); } }, `Show ${PAGE_SIZE} at a time`)]
+      : [el("span", { style: "display:inline-flex" },
+          el("button", { class: "pg", "aria-label": "Previous page", disabled: state.page === 0 ? "" : null, onclick: to(state.page - 1) }, icon("left")),
+          el("button", { class: "pg", "aria-label": "Next page", disabled: state.page >= pages - 1 ? "" : null, onclick: to(state.page + 1) }, icon("right"))),
+        el("span", { class: "num" }, `${fmt(first)}–${fmt(first + shown.length - 1)} of ${fmt(rows.length)}`),
+        el("button", { class: "link", onclick: () => { state.all = true; render(); } }, "Show all, to use the browser's find")]));
+  }
+  return done();
+}
+
+function rowsTable(f, part, rows, isFocus) {
+  const sign = part === "added" ? "+" : "−";
+  const head = el("tr", {}, el("th", {}, part === "added" ? "Line (new)" : "Line (base)"), f.columns.map(c => el("th", {}, c)));
+  const body = rows.map(row => el("tr", { class: isFocus(row) ? "focus" : null },
+    el("td", { class: "ln " + (part === "added" ? "a" : "d") }, sign + row[0]), f.columns.map((_, i) => el("td", {}, row[1][i] ?? ""))));
+  return el("div", { class: "tablewrap" }, el("table", {}, el("thead", {}, head), el("tbody", {}, body)));
+}
+
+function modifiedTable(f, rows, isFocus) {
+  const pk = f.primary_key, changed = [];
+  for (const r of rows) for (const c of Object.keys(r.changes)) if (!pk.includes(c) && !changed.includes(c)) changed.push(c);
+  changed.sort((a, b) => f.columns.indexOf(a) - f.columns.indexOf(b));
+  const cols = [...pk, ...changed];
+  const head = el("tr", {}, el("th", {}, "Line"), cols.map(c => el("th", {}, c)));
+  const body = rows.map(r => el("tr", { class: isFocus(r) ? "focus" : null },
+    el("td", { class: "ln" }, r.lines[0] === r.lines[1] ? r.lines[0] : r.lines.join(" → ")), cols.map(c => {
+      const ch = r.changes[c];
+      const newId = r.new_id && r.new_id[c] !== r.id[c] ? r.new_id[c] : null;
+      if (ch) return el("td", {}, el("del", {}, ch[0] || "∅"), el("span", { class: "arrow" }, "→"), el("ins", {}, ch[1] || "∅"));
+      if (newId != null) return el("td", {}, el("del", {}, r.id[c]), el("span", { class: "arrow" }, "→"), el("ins", {}, newId));
+      const i = f.columns.indexOf(c);
+      return el("td", { class: pk.includes(c) ? null : "same" }, i >= 0 ? (r.values[i] ?? "") : "");
+    })));
+  return el("div", { class: "tablewrap" }, el("table", {}, el("thead", {}, head), el("tbody", {}, body)));
+}
+
+/* ---------- Shape geometry ---------- */
+// Points: [lon, lat, sequence, only_here, gap_m, same_next], measured by the engine.
+const FAR_M = 20, M_PER_DEG = D.constants.meters_per_degree;
+
+function segDist(p, a, b, k) {
+  const px = p[0] * k, py = p[1], ax = a[0] * k, ay = a[1], bx = b[0] * k, by = b[1];
+  const dx = bx - ax, dy = by - ay, len = dx * dx + dy * dy;
+  const t = len ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len)) : 0;
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy) * M_PER_DEG;
+}
+function gaps(coords, other, k, enough) {
+  return coords.map(p => {
+    let best = Infinity;
+    for (let j = 1; j < other.length && best > enough; j++) best = Math.min(best, segDist(p, other[j - 1], other[j], k));
+    return best;
+  });
+}
+const measured = p => p.length > 4 && p[4] != null;
+const gapOf = (p, other, k) => measured(p) ? p[4] : gaps([p], other, k, 0)[0];
+function farMask(coords, other, k) {
+  if (!coords || !coords.length || !other || other.length < 2) return null;
+  if (measured(coords[0])) return coords.map(p => p[4] > FAR_M);
+  return gaps(coords, other, k, FAR_M).map(d => d > FAR_M);
+}
+function complete(i) {
+  const a = i.base_coords, b = i.new_coords;
+  return !!(a && b && a.length >= 2 && b.length >= 2 && a.length === i.base_points && b.length === i.new_points);
+}
+const MAX_DOTS = 50;
+function pointEdits(i) {
+  const a = i.base_coords, b = i.new_coords;
+  if (a && b && a.length && b.length && a[0].length > 3) return { onlyBase: a.filter(p => p[3]), onlyNew: b.filter(p => p[3]) };
+  if (!complete(i)) return { onlyBase: [], onlyNew: [] };
+  const key = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`;
+  const inNew = new Set(b.map(key)), inBase = new Set(a.map(key));
+  return { onlyBase: a.filter(p => !inNew.has(key(p))), onlyNew: b.filter(p => !inBase.has(key(p))) };
+}
+function exactGap(i) {
+  const a = i.base_coords, b = i.new_coords;
+  if (a && b && a.length && b.length && measured(a[0])) return Math.max(...a.map(p => p[4]), ...b.map(p => p[4]));
+  if (!complete(i)) return null;
+  const k = Math.cos(a[0][1] * Math.PI / 180);
+  return Math.max(...gaps(a, b, k, 0), ...gaps(b, a, k, 0));
+}
+function runs(coords, mask) {
+  const out = [];
+  let cur = [];
+  coords.forEach((p, i) => { if (mask[i]) cur.push(p); else { if (cur.length >= 2) out.push(cur); cur = []; } });
+  if (cur.length >= 2) out.push(cur);
+  return out;
+}
+const sameSegments = coords => coords.slice(1).map((_, i) => coords[i][5] === 1);
+function segmentRuns(coords, mask, want) {
+  const out = [];
+  let cur = null;
+  mask.forEach((m, i) => {
+    if (m === want) { if (!cur) cur = [coords[i]]; cur.push(coords[i + 1]); } else if (cur) { out.push(cur); cur = null; }
+  });
+  if (cur) out.push(cur);
+  return out;
+}
+
+// Esri needs no key and serves pages opened from a file.
+const MAP_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+const MAP_MAX_ZOOM = 16;
+const MAP_CREDIT = "Esri, HERE, Garmin, © OpenStreetMap contributors";
+const mercY = lat => -Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) * 180 / Math.PI;
+
+// Metres around a fixed origin, so float precision holds at deep zoom.
+function mapTiles(x0, y0, w, h, px, tf, view) {
+  const g = sv("g", { class: "tiles" });
+  const dx0 = x0 / tf.s + tf.ox, dy0 = y0 / tf.s + tf.oy, dw = w / tf.s, dh = h / tf.s;
+  const z = Math.max(0, Math.min(MAP_MAX_ZOOM, Math.round(Math.log2(360 * px / (256 * dw)))));
+  const n = 2 ** z, size = 360 / n;
+  const tx0 = Math.floor((dx0 + 180) / size), tx1 = Math.floor((dx0 + dw + 180) / size);
+  const ty0 = Math.max(0, Math.floor((dy0 + 180) / size)), ty1 = Math.min(n - 1, Math.floor((dy0 + dh + 180) / size));
+  const url = MAP_TILES;
+  for (let tx = tx0; tx <= tx1; tx++) {
+    for (let ty = ty0; ty <= ty1; ty++) {
+      const img = sv("image", { x: (tx * size - 180 - tf.ox) * tf.s, y: (ty * size - 180 - tf.oy) * tf.s,
+        width: size * tf.s, height: size * tf.s, preserveAspectRatio: "none" });
+      img.addEventListener("error", () => view && view.classList.add("is-offline"), { once: true });
+      img.addEventListener("load", () => view && view.classList.remove("is-offline"), { once: true });
+      img.setAttribute("href", url.replace("{z}", z).replace("{x}", ((tx % n) + n) % n).replace("{y}", ty));
+      g.append(img);
+    }
+  }
+  return g;
+}
+
+function frame(pts, focusPts, box, minSpan, pad) {
+  const lat0 = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const k = Math.cos(lat0 * Math.PI / 180);
+  const tf = { ox: pts[0][0], oy: mercY(pts[0][1]), s: M_PER_DEG * k, k };
+  const X = p => (p[0] - tf.ox) * tf.s, Y = p => (mercY(p[1]) - tf.oy) * tf.s;
+  const use = focusPts && focusPts.length ? focusPts : pts;
+  const xs = use.map(X), ys = use.map(Y);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  let w = Math.max(x1 - x0, minSpan) * pad, h = Math.max(y1 - y0, minSpan) * pad;
+  if (w / h < box.pw / box.ph) w = h * box.pw / box.ph; else h = w * box.ph / box.pw;
+  return { tf, X, Y, vb: [(x0 + x1) / 2 - w / 2, (y0 + y1) / 2 - h / 2, w, h] };
+}
+
+function shapeSvg(item, big, focus, box) {
+  const svg = sv("svg", { role: "img", "aria-label": `Shape ${shapeTitle(item)}, old and new` });
+  const a = item.base_coords || [], b = item.new_coords || [];
+  const all = [...a, ...b];
+  if (!all.length) return svg;
+  const lat0 = all.reduce((s, p) => s + p[1], 0) / all.length;
+  const k = Math.cos(lat0 * Math.PI / 180);
+  const farBase = farMask(a, b, k), farNew = farMask(b, a, k);
+  const far = [...(farBase ? runs(a, farBase) : []), ...(farNew ? runs(b, farNew) : [])];
+  const edits = pointEdits(item);
+  const dots = edits.onlyBase.length + edits.onlyNew.length <= MAX_DOTS;
+  const changed = far.length ? far.flat() : dots ? [...edits.onlyBase, ...edits.onlyNew] : [];
+  const fr = frame(all, focus ? changed : null, box, focus ? 300 : 1, focus ? 1.35 : big ? 1.12 : 1.16);
+  const { X, Y, tf } = fr;
+  svg.setAttribute("viewBox", fr.vb.join(" "));
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  const layers = { same: sv("g", { class: "L-same" }), old: sv("g", { class: "L-old" }), new: sv("g", { class: "L-new" }), top: sv("g") };
+  const tip = (node, text) => { const t = sv("title"); t.textContent = text; node.append(t); };
+  const thin = big ? 2.5 : 1.8, thick = big ? 8 : 5.5;
+  const where = p => `${p[1].toFixed(6)}, ${p[0].toFixed(6)}`;
+  const seq = p => p.length > 2 ? ` · point ${Number.isInteger(p[2]) ? p[2] : p[2].toLocaleString("en-US")}` : "";
+  const sides = {
+    base: { coords: a, other: b, name: "old shape", otherName: "new line", cls: "old" },
+    new: { coords: b, other: a, name: "new shape", otherName: "old line", cls: "new" },
+  };
+  const describe = (side, p, lead) => {
+    const s = sides[side];
+    const gap = s.other && s.other.length > 1 ? ` · ${metres(gapOf(p, s.other, k))} from the ${s.otherName}` : "";
+    return `${lead || `Point of the ${s.name}`}${seq(p)} · ${where(p)}${gap}`;
+  };
+  const show = text => { const box = document.getElementById("zoom-info"); if (box) box.textContent = text; };
+  const pts = coords => coords.map(p => `${X(p).toFixed(1)},${Y(p).toFixed(1)}`).join(" ");
+  const draw = (g, coords, cls, width, dash, label) => {
+    if (!coords || coords.length < 2) return;
+    const p = pts(coords);
+    // Under the whole layer, so a thin line over a thick one stays solid.
+    if (big) {
+      if (!g.casing) { g.casing = sv("g"); g.prepend(g.casing); }
+      g.casing.append(sv("polyline", { points: p, class: "ln case", "stroke-width": width + 3 }));
+    }
+    const pl = sv("polyline", { points: p, class: "ln " + cls, "stroke-width": width, "stroke-dasharray": dash });
+    if (label) tip(pl, label);
+    g.append(pl);
+  };
+  const dash = big ? "8 6" : "5 4";
+  if (farBase) runs(a, farBase).forEach(r => draw(layers.old, r, "old", thick, null));
+  if (farNew) runs(b, farNew).forEach(r => draw(layers.new, r, "new", thick, null));
+  if (a.length > 1 && b.length > 1) {
+    const sameA = sameSegments(a), sameB = sameSegments(b);
+    segmentRuns(a, sameA, true).forEach(r => draw(layers.same, r, "same", thin, null, big ? "The same in both shapes" : null));
+    segmentRuns(a, sameA, false).forEach(r => draw(layers.old, r, "old", thin + 0.5, null, big ? "Only in the old shape" : null));
+    segmentRuns(b, sameB, false).forEach(r => draw(layers.new, r, "new", thin + 0.5, dash, big ? "Only in the new shape" : null));
+  } else {
+    draw(layers.old, a, "old", thin + 0.5, null, big ? "The deleted shape" : null);
+    draw(layers.new, b, "new", thin + 0.5, null, big ? "The added shape" : null);
+  }
+  const circle = (g, p, cls, scale, text) => {
+    const c = sv("circle", { cx: X(p), cy: Y(p), r: fr.vb[2] * scale, class: "dot " + cls });
+    c.dataset.scale = scale;
+    if (text && big) { tip(c, text); c.style.cursor = "pointer"; c.addEventListener("click", e => { e.stopPropagation(); show(text); }); }
+    g.append(c);
+  };
+  if (big) for (const side of ["base", "new"]) {
+    const { coords, name, cls } = sides[side];
+    if (coords.length < 2) continue;
+    const pl = sv("polyline", { points: pts(coords), class: "hit" });
+    tip(pl, `${name[0].toUpperCase()}${name.slice(1)}: click for the nearest point`);
+    pl.addEventListener("click", e => {
+      const at = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+      let best = coords[0], bestD = Infinity;
+      for (const p of coords) { const d = (X(p) - at.x) ** 2 + (Y(p) - at.y) ** 2; if (d < bestD) { bestD = d; best = p; } }
+      show(describe(side, best));
+    });
+    layers[cls].append(pl);
+  }
+  if (big) {
+    for (const side of ["base", "new"]) {
+      const { coords, cls, name } = sides[side];
+      if (coords.length) circle(layers[cls], coords[0], cls, 0.005, describe(side, coords[0], `Start of the ${name}`));
+    }
+    if (dots) {
+      edits.onlyBase.forEach(p => circle(layers.old, p, "old", 0.0075, describe("base", p, "Only in the old shape")));
+      edits.onlyNew.forEach(p => circle(layers.new, p, "new", 0.0075, describe("new", p, "Only in the new shape")));
+    }
+  }
+  // Rings: each place a highlighted shape moved MOVED_M or more.
+  const halos = sv("g");
+  if (!big && item.change === "changed" && a.length > 1 && b.length > 1) {
+    const w = fr.vb[2], places = [];
+    for (const [coords, other] of [[a, b], [b, a]]) {
+      let cur = null;
+      coords.forEach(p => {
+        if (gapOf(p, other, k) >= MOVED_M) (cur = cur || []).push(p);
+        else if (cur) { places.push(cur); cur = null; }
+      });
+      if (cur) places.push(cur);
+    }
+    let rings = places.map(pl => {
+      const xs = pl.map(X), ys = pl.map(Y);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, r: Math.min(Math.max(Math.hypot(x1 - x0, y1 - y0) / 2 * 1.2, w * 0.07), w * 0.3) };
+    });
+    for (let merged = true; merged;) {
+      merged = false;
+      for (let i = 0; i < rings.length && !merged; i++) {
+        for (let j = i + 1; j < rings.length && !merged; j++) {
+          const p = rings[i], q = rings[j], d = Math.hypot(p.cx - q.cx, p.cy - q.cy);
+          if (d < p.r + q.r) {
+            const r = Math.min((d + p.r + q.r) / 2, w * 0.3), t = d ? (r - p.r) / d : 0;
+            rings[i] = { cx: p.cx + (q.cx - p.cx) * t, cy: p.cy + (q.cy - p.cy) * t, r: Math.max(r, p.r, q.r) };
+            rings.splice(j, 1);
+            merged = true;
+          }
+        }
+      }
+    }
+    rings.forEach(c => halos.append(sv("circle", { ...c, class: "halo" })));
+  }
+  svg.append(halos, layers.same, layers.old, layers.new, layers.top);
+  svg.tf = tf;
+  svg.toView = p => [X(p), Y(p)];
+  return svg;
+}
+
+function stopSvg(h, box) {
+  const place = stopPlace(h), d = h.details || {};
+  const old = [place.base[1], place.base[0]], now = [place.new[1], place.new[0]];
+  const fr = frame([old, now], null, box, Math.max(220, (d.distance_m || 0) * 3.2), 1);
+  const { X, Y } = fr;
+  const svg = sv("svg", { viewBox: fr.vb.join(" "), preserveAspectRatio: "xMidYMid meet", role: "img", "aria-label": h.message });
+  const g = sv("g");
+  const r = fr.vb[2];
+  const dot = (p, cls, scale, label) => {
+    const c = sv("circle", { cx: X(p), cy: Y(p), r: r * scale, class: "dot " + cls });
+    c.dataset.scale = scale;
+    const t = sv("title"); t.textContent = label; c.append(t);
+    g.append(c);
+  };
+  g.append(sv("line", { x1: X(old), y1: Y(old), x2: X(now), y2: Y(now), class: "ln case", "stroke-width": 6 }));
+  g.append(sv("line", { x1: X(old), y1: Y(old), x2: X(now), y2: Y(now), class: "ln link", "stroke-width": 2, "stroke-dasharray": "2 6" }));
+  dot(old, "hollow", 0.011, `Old place · ${place.base.join(", ")}`);
+  dot(now, "new", 0.013, `New place · ${place.new.join(", ")}`);
+  svg.append(g);
+  svg.tf = fr.tf;
+  return svg;
+}
+
+function makeZoomable(svg, view, pw) {
+  const start = svg.getAttribute("viewBox").split(" ").map(Number);
+  let [x, y, w, h] = start;
+  let timer = null;
+  const scale = el("div", { class: "scalebar" });
+  const updateScale = () => {
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const perPx = Math.max(w / r.width, h / r.height), target = 90 * perPx;
+    const step = 10 ** Math.floor(Math.log10(target));
+    const len = [5, 2, 1].map(f => f * step).find(v => v <= target) || step;
+    scale.replaceChildren(len >= 1000 ? `${fmt(len / 1000)} km` : `${fmt(len)} m`, el("i", { style: `width:${Math.round(len / perPx)}px` }));
+  };
+  const tiles = (now) => {
+    clearTimeout(timer);
+    const put = () => {
+      const old = svg.querySelector(".tiles");
+      const t = mapTiles(x, y, w, h, pw, svg.tf, view);
+      if (old) old.replaceWith(t); else svg.prepend(t);
+    };
+    if (now) put(); else timer = setTimeout(put, 120);
+  };
+  view.refreshTiles = () => tiles(true);
+  const apply = () => {
+    svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    updateScale();
+    svg.querySelectorAll("circle").forEach(c => c.setAttribute("r", w * c.dataset.scale));
+    tiles(false);
+  };
+  const MIN_WIDTH_M = 5;
+  const zoomBy = (factor, fx = 0.5, fy = 0.5) => {
+    if (w * factor < MIN_WIDTH_M) factor = MIN_WIDTH_M / w;
+    x += fx * w * (1 - factor); y += fy * h * (1 - factor); w *= factor; h *= factor;
+    apply();
+  };
+  svg.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = svg.getBoundingClientRect();
+    zoomBy(Math.exp(Math.max(-1, Math.min(1, e.deltaY / 100)) * 0.22), (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", e => {
+    if (e.target.tagName === "circle" || e.button !== 0) return;
+    drag = { sx: e.clientX, sy: e.clientY, x, y, moved: false };
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect();
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 3) { drag.moved = true; svg.style.cursor = "grabbing"; svg.setPointerCapture(e.pointerId); }
+    if (drag.moved) {
+      const per = Math.max(w / r.width, h / r.height);
+      x = drag.x - dx * per; y = drag.y - dy * per;
+      apply();
+    }
+  });
+  const end = () => { svg.style.cursor = ""; setTimeout(() => { drag = null; }, 0); };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  svg.addEventListener("click", e => { if (drag && drag.moved) e.stopPropagation(); }, true);
+  svg.addEventListener("dblclick", e => { const r = svg.getBoundingClientRect(); zoomBy(0.5, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); });
+  const bar = el("div", { class: "mapctl tl" },
+    el("button", { class: "mbtn", title: "Zoom in", "aria-label": "Zoom in", onclick: () => zoomBy(0.7) }, icon("plus")),
+    el("button", { class: "mbtn", title: "Zoom out", "aria-label": "Zoom out", onclick: () => zoomBy(1 / 0.7) }, icon("minus")),
+    el("button", { class: "mbtn", title: "Back to the first view", "aria-label": "Back to the first view", onclick: () => { [x, y, w, h] = start; apply(); } }, icon("fit")));
+  const focusOn = (cx, cy, span) => {
+    const r = svg.getBoundingClientRect(), ratio = r.width && r.height ? r.height / r.width : start[3] / start[2];
+    w = span; h = span * ratio; x = cx - w / 2; y = cy - h / 2;
+    apply();
+  };
+  new ResizeObserver(() => {
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const cx = x + w / 2, cy = y + h / 2;
+    const want = r.height / r.width;
+    if (Math.abs(h / w - want) > 0.01) { const span = Math.max(w, h / want); w = span; h = span * want; x = cx - w / 2; y = cy - h / 2; }
+    svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    updateScale();
+  }).observe(svg);
+  if (state.tiles) tiles(true);
+  return { bar, focusOn, scale, updateScale };
+}
+
+function shapeEdits(i) {
+  const a = i.base_coords, b = i.new_coords;
+  if (!a || !b || a.length < 2 || b.length < 2) return [];
+  const k = Math.cos(a[0][1] * Math.PI / 180);
+  const seq = p => p.length > 2 ? `point ${p[2]}` : "a point";
+  const out = [];
+  for (const [coords, other, name, otherName, cls] of [[a, b, "old", "new", "t-del"], [b, a, "new", "old", "t-add"]]) {
+    const mask = farMask(coords, other, k);
+    for (const r of mask ? runs(coords, mask) : []) {
+      const gap = Math.max(...r.map(p => gapOf(p, other, k)));
+      const first = r[0], last = r[r.length - 1];
+      const span = first.length > 2 ? `points ${first[2]}–${last[2]}` : `${r.length} points`;
+      out.push({ cls, side: name, at: r, gap, label: `${name === "old" ? "Old" : "New"} line, ${span}`, detail: `apart from the ${otherName} line` });
+    }
+  }
+  const e = pointEdits(i);
+  if (e.onlyBase.length + e.onlyNew.length <= 500) {
+    for (const [pts, other, name, otherName, cls] of [[e.onlyBase, b, "old", "new", "t-del"], [e.onlyNew, a, "new", "old", "t-add"]]) {
+      for (const p of pts) {
+        const gap = gapOf(p, other, k);
+        out.push({ cls, side: name, at: [p], gap, label: `Only in the ${name} shape, ${seq(p)}`, detail: `from the ${otherName} line · ${p[1].toFixed(6)}, ${p[0].toFixed(6)}` });
+      }
+    }
+  }
+  return out.sort((x, y) => y.gap - x.gap);
+}
+
+const shapeTitle = i => i.base && i.new && i.base !== i.new ? `${i.base} → ${i.new}` : i.base || i.new;
+const shapeGap = i => i.dev == null ? null : exactGap(i) ?? i.dev;
+
+function shapeSummary(i) {
+  const gap = shapeGap(i);
+  if (i.change === "added") return i.new_len != null ? `${metres(i.new_len)} long` : "new";
+  if (i.change === "deleted") return i.base_len != null ? `${metres(i.base_len)} long` : "removed";
+  if (i.change === "renamed") return "same points";
+  return gap == null ? "" : gap < 0.05 ? "the line did not move" : `moved up to ${metres(gap)}`;
+}
+
+/* ---------- Shapes tab ---------- */
+const lineSwatch = (cls, dash, thick) => {
+  const s = sv("svg", { class: "sw", viewBox: "0 0 26 10", "aria-hidden": "true" });
+  s.append(sv("line", { x1: 2, y1: 5, x2: 24, y2: 5, class: "ln " + cls, "stroke-width": thick ? 6 : 2.6, "stroke-dasharray": dash ? "5 3.5" : null }));
+  return s;
+};
+const dotSwatch = cls => {
+  const s = sv("svg", { class: "sw", viewBox: "0 0 26 10", "aria-hidden": "true" });
+  s.append(sv("circle", { cx: 13, cy: 5, r: 4.2, class: "dot " + cls }));
+  return s;
+};
+const ringSwatch = () => {
+  const s = sv("svg", { class: "sw", viewBox: "0 0 26 14", style: "height:14px", "aria-hidden": "true" });
+  s.append(sv("circle", { cx: 13, cy: 7, r: 6, class: "halo" }));
+  return s;
+};
+
+function shapeLegend() {
+  return el("div", { class: "legend" },
+    el("span", {}, lineSwatch("same"), "Same in both"), el("span", {}, lineSwatch("old"), "Only in the old shape"),
+    el("span", {}, lineSwatch("new", true), "Only in the new shape"),
+    el("span", {}, lineSwatch("old", false, true), `Thick: more than ${FAR_M} m apart`),
+    D.shapes && D.shapes.counts.changed ? el("span", {}, ringSwatch(), `Ring: moved ${fmt(MOVED_M)} m or more`) : null);
+}
+
+const thumbCache = new Map();
+function thumb(i, list) {
+  let svg = thumbCache.get(i);
+  if (!svg) { svg = shapeSvg(i, false, false, { pw: 4, ph: 3 }); thumbCache.set(i, svg); }
+  const gap = shapeGap(i);
+  const lead = (i.change === "changed" || i.change === "redrawn") && gap != null
+    ? `${SHAPE_LABEL[i.change]} ${gap < 0.05 ? "0 m" : metres(gap)}` : SHAPE_LABEL[i.change];
+  const rest = [i.route ? `route ${i.route}` : null, i.change === "added" || i.change === "deleted" ? shapeSummary(i) : null].filter(Boolean);
+  return el("button", { class: "thumb", title: `Open ${shapeTitle(i)} on a map`, onclick: () => openMap(list.map(item => ({ item })), list.indexOf(i)) },
+    svg, el("div", { class: "tt", title: shapeTitle(i) }, shapeTitle(i)),
+    el("div", { class: "tm" }, el("b", { class: "tag-" + i.change }, lead), rest.length ? ` · ${rest.join(" · ")}` : ""));
+}
+
+function shapesTab() {
+  const S = D.shapes;
+  if (!S) {
+    return el("section", { class: "sec" }, el("h2", {}, "Shapes"),
+      el("p", { class: "sec-sub" }, "Shape geometry was not compared. Run with ", el("span", { class: "mono" }, "--shape-geometry"), " to draw every changed shape here."));
+  }
+  const total = sum(SHAPE_ORDER.filter(k => k !== "renamed").map(k => S.counts[k]));
+  const p = el("section", { class: "sec" },
+    el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "Shapes"),
+      el("p", { class: "sec-sub" }, "Every changed shape, old line against new, largest change first. Open one to explore it on a street map."))),
+    shapeLegend());
+  const kinds = ["all", ...SHAPE_ORDER.filter(k => S.counts[k])];
+  const search = el("label", { class: "search" }, icon("search"),
+    el("input", { id: "shapeq", type: "search", placeholder: "Find a shape or route", value: state.shapeQ, "aria-label": "Find a shape or route",
+      oninput: e => { state.shapeQ = e.target.value; render(); } }), state.shapeQ ? null : el("kbd", {}, "/"));
+  p.append(el("div", { class: "filters" }, el("div", { class: "chips", role: "tablist" }, kinds.map(k =>
+    el("button", { class: "chipbtn" + (k === state.shape ? " on" : ""), role: "tab", "aria-selected": String(k === state.shape), onclick: () => { state.shape = k; render(); } },
+      k === "all" ? "All" : SHAPE_FILTER[k], el("span", { class: "c" }, fmt(k === "all" ? total : S.counts[k]))))), state.shape === "renamed" ? null : search));
+  if (state.shape === "renamed") {
+    const rows = S.renamed.map(([b, n, r]) => el("tr", {}, el("td", {}, b), el("td", {}, n), el("td", {}, r ?? "")));
+    p.append(el("p", { class: "sec-sub", style: "margin:-10px 0 14px" }, "New IDs for the very same lines."),
+      el("div", { class: "tablewrap" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Old shape_id"), el("th", {}, "New shape_id"), el("th", {}, "Route"))), el("tbody", {}, rows))));
+    return p;
+  }
+  const q = state.shapeQ.trim().toLowerCase();
+  const items = S.items.filter(i => (state.shape === "all" || i.change === state.shape)
+    && (!q || [i.base, i.new, i.route].some(v => v && String(v).toLowerCase().includes(q)))).sort(byChange);
+  const inGroup = state.shape === "all" ? total : S.counts[state.shape];
+  const drawnInGroup = S.items.filter(i => state.shape === "all" || i.change === state.shape).length;
+  if (!items.length) { p.append(el("div", { class: "empty" }, q ? `No drawn shape or route matches “${state.shapeQ.trim()}”.` : "No shapes in this group.")); return p; }
+  p.append(el("div", { class: "gallery" }, items.map(i => thumb(i, items))));
+  if (drawnInGroup < inGroup) p.append(el("div", { class: "fine" },
+    `Drawn here: ${fmt(drawnInGroup)} of ${fmt(inGroup)}, the largest changes first. The page draws up to ${fmt(D.caps.shapes)} shapes with ${fmt(D.caps.points)} points each; the JSON report lists them all.`));
+  return p;
+}
+
+/* ---------- Map dialog ---------- */
+const zoomDlg = document.getElementById("zoom");
+let mapList = [], mapIndex = 0;
+
+function openMap(list, index) {
+  if (!list.length || index < 0) return;
+  mapList = list; mapIndex = index;
+  state.whole = false;
+  showMap();
+  if (!zoomDlg.open) zoomDlg.showModal();
+}
+
+function mapBox() {
+  const narrow = innerWidth <= 900;
+  const dlgW = narrow ? innerWidth : Math.min(1480, innerWidth - 32);
+  const dlgH = narrow ? innerHeight : innerHeight - 32;
+  return narrow ? { pw: dlgW, ph: innerHeight * 0.58 } : { pw: dlgW - 330, ph: dlgH - 51 };
+}
+
+function showMap() {
+  const entry = mapList[mapIndex];
+  const nav = document.getElementById("zoom-nav");
+  const step = d => () => { if (mapList[mapIndex + d]) { mapIndex += d; state.whole = false; showMap(); } };
+  swap(nav,
+    mapList.length > 1 ? [el("button", { class: "iconbtn", "aria-label": "Previous", title: "Previous (←)", disabled: mapIndex === 0 ? "" : null, onclick: step(-1) }, icon("left")),
+      el("span", { class: "pos" }, `${mapIndex + 1} of ${mapList.length}`),
+      el("button", { class: "iconbtn", "aria-label": "Next", title: "Next (→)", disabled: mapIndex >= mapList.length - 1 ? "" : null, onclick: step(1) }, icon("right"))] : null,
+    el("button", { class: "iconbtn", "aria-label": "Close", title: "Close (Esc)", onclick: () => zoomDlg.close() }, icon("close")));
+  if (entry.item) shapeMap(entry.item); else stopMap(entry.stop);
+  state.map = entry.item ? `${entry.item.base || ""}|${entry.item.new || ""}` : null;
+  writeHash();
+}
+
+function mapFrame(svg, extra) {
+  const box = mapBox();
+  const view = el("div", { class: "mapview" + (state.tiles ? "" : " notiles") });
+  const zoomer = makeZoomable(svg, view, box.pw);
+  const tilesBtn = el("button", { class: "mbtn" + (state.tiles ? "" : " off"), title: "Show or hide the street map", "aria-pressed": String(state.tiles),
+    onclick: () => {
+      state.tiles = !state.tiles;
+      try { localStorage.setItem("gtfs-diff-tiles", state.tiles ? "on" : "off"); } catch (e) { /* storage blocked */ }
+      view.classList.toggle("notiles", !state.tiles); tilesBtn.classList.toggle("off", !state.tiles); tilesBtn.setAttribute("aria-pressed", String(state.tiles));
+      if (state.tiles) view.refreshTiles();
+    } }, icon("map"), "Street map");
+  put(view, svg, zoomer.bar, extra,
+    el("div", { class: "mapctl tr" }, el("span", { class: "offline", title: "The street map needs an internet connection. The lines are exact without it." }, "Offline: lines only"), tilesBtn),
+    zoomer.scale, el("div", { class: "credit" }, MAP_CREDIT), el("div", { class: "mapinfo", id: "zoom-info" }));
+  requestAnimationFrame(zoomer.updateScale);
+  return { view, zoomer };
+}
+
+function shapeMap(i) {
+  swap(document.getElementById("zoom-title"),
+    el("span", { class: "k tag-" + i.change }, SHAPE_LABEL[i.change]), el("span", { class: "t" }, shapeTitle(i)),
+    i.route ? el("span", { class: "s" }, `route ${i.route}`) : null);
+  const paired = i.base_coords.length > 1 && i.new_coords.length > 1;
+  const items = paired ? shapeEdits(i) : [];
+  const svg = shapeSvg(i, true, paired && !state.whole, mapBox());
+  for (const k of Object.keys(state.hidden)) if (state.hidden[k]) svg.classList.add("hide-" + k);
+  const seg = paired ? el("div", { class: "mapctl tc" }, el("div", { class: "seg" },
+    el("button", { class: state.whole ? "" : "on", onclick: () => { state.whole = false; showMap(); } }, "Where it moved"),
+    el("button", { class: state.whole ? "on" : "", onclick: () => { state.whole = true; showMap(); } }, "Whole shape"))) : null;
+  const { view, zoomer } = mapFrame(svg, seg);
+  const gap = shapeGap(i);
+  const facts = [];
+  if (i.route) facts.push(["Route", i.route]);
+  if (i.base_points != null || i.new_points != null) facts.push(["Points", i.base_points != null && i.new_points != null && i.base_points !== i.new_points ? `${fmt(i.base_points)} → ${fmt(i.new_points)}` : fmt(i.new_points ?? i.base_points)]);
+  if (i.base_len != null || i.new_len != null) facts.push(["Length", i.base_len != null && i.new_len != null ? `${metres(i.base_len)} → ${metres(i.new_len)}` : metres(i.base_len ?? i.new_len)]);
+  if (i.base && i.new && i.base !== i.new) facts.push(["shape_id", `${i.base} → ${i.new}`]);
+  const toggle = (k, sw, label) => {
+    const b = el("button", { class: "toggle" + (state.hidden[k] ? " off" : ""), "aria-pressed": String(!state.hidden[k]), title: "Show or hide on the map",
+      onclick: () => { state.hidden[k] = !state.hidden[k]; svg.classList.toggle("hide-" + k, state.hidden[k]); b.classList.toggle("off", state.hidden[k]);
+        b.setAttribute("aria-pressed", String(!state.hidden[k])); b.querySelector(".eye").replaceChildren(icon(state.hidden[k] ? "eyeOff" : "eye")); } },
+      sw, label, el("span", { class: "eye" }, icon(state.hidden[k] ? "eyeOff" : "eye")));
+    return b;
+  };
+  const e = pointEdits(i);
+  const keys = paired ? [toggle("same", lineSwatch("same"), "Same in both shapes"), toggle("old", lineSwatch("old"), "Old shape only"), toggle("new", lineSwatch("new", true), "New shape only")]
+    : [el("div", { class: "toggle static" }, i.base_coords.length ? lineSwatch("old") : lineSwatch("new"), i.base_coords.length ? "The deleted shape" : "The added shape")];
+  const notes = [];
+  if (items.some(x => x.at.length > 1)) notes.push(el("div", { class: "toggle static" }, el("span", { style: "display:inline-flex" }, lineSwatch("old", false, true)), `Thick: more than ${FAR_M} m apart`));
+  if (paired && e.onlyBase.length + e.onlyNew.length <= MAX_DOTS && e.onlyBase.length + e.onlyNew.length) notes.push(el("div", { class: "toggle static" }, dotSwatch("old"), "A point in one shape only"));
+  let list = null;
+  const maxGap = Math.max(1, ...items.map(x => x.gap));
+  if (items.length) {
+    list = el("div", {}, items.map(it => el("button", { class: "chg", onclick: ev => {
+      for (const b of list.querySelectorAll(".chg.on")) b.classList.remove("on");
+      ev.currentTarget.classList.add("on");
+      const pts = it.at.map(svg.toView), xs = pts.map(q => q[0]), ys = pts.map(q => q[1]);
+      const extent = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      zoomer.focusOn((Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2, Math.max(extent * 1.6, 120));
+      document.getElementById("zoom-info").textContent = `${it.label} · ${metres(it.gap)} ${it.detail}`;
+    } }, el("span", { class: "l " + it.cls }, it.label), el("span", { class: "g" }, metres(it.gap)), el("span", { class: "d" }, it.detail),
+      el("span", { class: "bar" }, el("i", { class: it.side === "old" ? "d" : "a", style: `width:${Math.max(2, it.gap / maxGap * 100)}%` })))));
+  }
+  const side = el("aside", { class: "side" },
+    gap != null && i.change !== "renamed" ? [el("div", { class: "big" }, gap < 0.05 ? "0 m" : metres(gap)), el("div", { class: "big-sub" }, gap < 0.05 ? "The line did not move." : "Largest distance between the old and new line.")]
+      : [el("div", { class: "big tag-" + i.change }, SHAPE_LABEL[i.change]), el("div", { class: "big-sub" }, i.change === "added" ? "Only in the new release." : "Only in the old release.")],
+    el("dl", { class: "facts" }, facts.map(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+    el("h3", {}, "On the map"), el("div", { class: "toggles" }, keys, notes),
+    list ? [el("h3", {}, `${plural(items.length, "change")}, largest first`), list] : null);
+  document.getElementById("zoom-body").replaceChildren(view, side);
+}
+
+function stopMap(h) {
+  const d = h.details || {}, place = stopPlace(h);
+  const id = refId(h, "stops.txt", "base") ?? refId(h, "stops.txt", "new");
+  swap(document.getElementById("zoom-title"),
+    el("span", { class: "k t-mod" }, "Stop moved"),
+    el("span", { class: "t" }, id), d.stop_name ? el("span", { class: "s" }, d.stop_name) : null);
+  const svg = stopSvg(h, mapBox());
+  const { view } = mapFrame(svg);
+  const facts = [["Stop", d.stop_name || id], ["stop_id", id],
+    ["Old place", place.base.map(v => v.toFixed(6)).join(", ")], ["New place", place.new.map(v => v.toFixed(6)).join(", ")]];
+  const side = el("aside", { class: "side" },
+    el("div", { class: "big" }, metres(d.distance_m)),
+    el("div", { class: "big-sub" }, "Between the old and the new place."),
+    el("dl", { class: "facts" }, facts.map(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+    el("h3", {}, "On the map"),
+    el("div", { class: "toggles" }, el("div", { class: "toggle static" }, dotSwatch("hollow"), "Old place"),
+      el("div", { class: "toggle static" }, dotSwatch("new"), "New place")),
+    el("h3", {}, "In the files"),
+    el("button", { class: "link", onclick: () => { zoomDlg.close(); showRow(h); } }, "See this row in stops.txt", icon("arrow")));
+  document.getElementById("zoom-body").replaceChildren(view, side);
+}
+
+zoomDlg.addEventListener("close", () => { state.map = null; writeHash(); });
+zoomDlg.addEventListener("click", e => { if (e.target === zoomDlg) zoomDlg.close(); });
+
+/* ---------- Tabs, routing and render ---------- */
+// [key, label, icon, count, description]
+function tabInfo() {
+  const S = D.shapes;
+  const shapes = S ? sum(SHAPE_ORDER.filter(k => k !== "renamed").map(k => S.counts[k])) : null;
+  return [
+    ["overview", "Overview", "grid", null, highlightTotal ? "Notable highlights, changes by file" : "Changes by file"],
+    ["files", "Files", "file", changedFiles.length || null, "Every changed row, old → new"],
+    ["shapes", "Shapes", "route", shapes || null, S ? "Old and new lines on a map" : "Not compared in this run"],
+  ];
+}
+
+function tabsBar() {
+  swap(document.getElementById("tabs"), tabInfo().map(([k, label, ic, n, what]) =>
+    el("button", { class: "tab" + (state.tab === k ? " on" : ""), "aria-current": state.tab === k ? "page" : null, title: what, onclick: () => setTab(k) },
+      icon(ic), el("span", { class: "lb" }, label, n != null ? el("span", { class: "c" }, fmt(n)) : null), el("span", { class: "ds" }, what))));
+}
+
+function nextTabs() {
+  return el("section", { class: "next" }, el("h3", {}, "Keep exploring"),
+    el("div", { class: "next-grid" }, tabInfo().filter(([k]) => k !== state.tab).map(([k, label, ic, n, what]) =>
+      el("button", { class: "next-btn", onclick: () => setTab(k) }, icon(ic),
+        el("span", { class: "lb" }, n != null ? `${label} · ${fmt(n)}` : label), el("span", { class: "ds" }, what), go()))));
+}
+
+function setTab(t) {
+  const changed = state.tab !== t;
+  state.tab = t;
+  render(changed);
+  const top = document.querySelector(".tabs").offsetTop;
+  if (scrollY > top) window.scrollTo({ top });
+}
+
+function writeHash() {
+  const p = new URLSearchParams();
+  p.set("tab", state.tab);
+  if (state.tab === "files" && state.file) { p.set("file", state.file); if (state.part) p.set("rows", state.part); if (state.col) p.set("column", state.col); }
+  if (state.tab === "shapes" && state.shape !== "all") p.set("kind", state.shape);
+  if (state.map) p.set("shape", state.map);
+  history.replaceState(null, "", "#" + p.toString());
+}
+
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (["overview", "files", "shapes"].includes(p.get("tab"))) state.tab = p.get("tab");
+  if (p.get("file") && ALL_FILES.some(f => f.name === p.get("file"))) state.file = p.get("file");
+  if (p.get("rows")) state.part = p.get("rows");
+  if (p.get("column")) state.col = p.get("column");
+  if (p.get("kind") && D.shapes && D.shapes.counts[p.get("kind")]) state.shape = p.get("kind");
+  return p.get("shape");
+}
+
+function render(animate) {
+  const active = document.activeElement, keep = active && active.id ? [active.id, active.selectionStart, active.selectionEnd] : null;
+  tabsBar();
+  const main = document.getElementById("main");
+  swap(main, state.tab === "files" ? filesTab() : state.tab === "shapes" ? shapesTab() : overviewTab(), nextTabs());
+  if (animate) { main.parentElement.classList.remove("enter"); void main.offsetWidth; main.parentElement.classList.add("enter"); }
+  if (keep) {
+    const n = document.getElementById(keep[0]);
+    if (n) { n.focus({ preventScroll: true }); if (n.setSelectionRange && keep[1] != null) n.setSelectionRange(keep[1], keep[2]); }
+  }
+  const row = main.querySelector("tr.focus");
+  if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
+  state.focus = null;
+  writeHash();
+}
+
+document.addEventListener("keydown", e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target || {}).tagName);
+  if (zoomDlg.open) {
+    if (typing) return;
+    if (e.key === "ArrowLeft" && mapIndex > 0) { mapIndex--; state.whole = false; showMap(); }
+    if (e.key === "ArrowRight" && mapIndex < mapList.length - 1) { mapIndex++; state.whole = false; showMap(); }
+    return;
+  }
+  if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) {
+    const box = document.getElementById("rowq") || document.getElementById("shapeq");
+    if (box) { e.preventDefault(); box.focus(); box.select(); }
+  }
+  if (e.key === "Escape" && typing && e.target.value) { e.target.value = ""; e.target.dispatchEvent(new Event("input")); }
+});
+
+header();
+const tabsEl = document.querySelector(".tabs");
+addEventListener("scroll", () => {
+  const hero = document.getElementById("hero"), stick = scrollY > hero.offsetTop + hero.offsetHeight;
+  if (stick === tabsEl.classList.contains("stuck")) return;
+  // Offsets the height change so the page does not jump.
+  const before = tabsEl.offsetHeight;
+  tabsEl.classList.toggle("stuck", stick);
+  tabsEl.style.marginBottom = stick ? `${before - tabsEl.offsetHeight}px` : "";
+}, { passive: true });
+const wantShape = readHash();
+render(false);
+if (wantShape && D.shapes) {
+  const [b, n] = wantShape.split("|");
+  const list = [...D.shapes.items].sort(byChange);
+  const at = list.findIndex(i => (i.base || "") === b && (i.new || "") === n);
+  if (at >= 0) openMap(list.map(item => ({ item })), at);
+}
+</script>
+</body>
+</html>

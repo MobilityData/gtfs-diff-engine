@@ -19,6 +19,9 @@ The output conforms to the **GTFS Diff v2 schema** maintained by MobilityData:
 - **Per-file and per-column change statistics** — modified files report true row-change percentages and optional per-column modification counts
 - **Unreliable-diff detection (`not_compared`)** — files whose primary keys are regenerated between versions ("id churn"), missing mandatory key columns, or duplicate primary-key values are flagged `not_compared` instead of producing a misleading row diff; id-churn thresholds are tunable globally or per file
 - **Configurable row-changes cap** — limit output size per file; omitted changes are counted in a `Truncated` record
+- **ID matching** — pairs entities by content, so regenerated IDs are not reported as changes ([docs/id_matching.md](docs/id_matching.md))
+- **Notable highlights** — what to check first, such as removed stops or days without trips ([docs/highlights.md](docs/highlights.md))
+- **HTML report** — one offline page next to the JSON, with optional shape maps (`--shape-geometry`) ([docs/html_report.md](docs/html_report.md))
 - **CLI and Python API** — use as a command-line tool or import directly in your code
 
 ## Installation
@@ -72,8 +75,9 @@ Options:
                                   probes all known GTFS files; for local feeds
                                   it restricts the comparison.
   -o, --output PATH               Write JSON output to FILE instead of stdout.
-  -c, --cap INTEGER               Max row changes per file (0 = omit row-level
-                                  detail).
+  -c, --cap INTEGER               Max row changes per file: 0 omits row-level
+                                  detail, otherwise at least 100, so every
+                                  changed column can have examples.
   --pretty / --no-pretty          Pretty-print JSON (default: --pretty).
   --base-downloaded-at TEXT       ISO 8601 datetime for when base was
                                   downloaded.
@@ -102,6 +106,48 @@ Options:
                                   percentages in each modified file's stats
                                   (default: on). The file-level
                                   rows_changed_percentage is always computed.
+  --id-matching / --no-id-matching
+                                  Match agencies, stops, routes, services,
+                                  trips and shapes by content before comparing
+                                  rows, so renamed or regenerated IDs are
+                                  diffed as the same entity (default: on). See
+                                  docs/id_matching.md.
+  --trip-max-shift MINUTES        With --id-matching, also pair trips whose
+                                  times moved by at most this many minutes at
+                                  every stop, tried in 5-minute steps. 0 pairs
+                                  only trips with identical times.  [default:
+                                  15.0; x>=0.0]
+  --trip-min-shared-stops SHARE   With --id-matching, also pair trips that
+                                  share at least this share of their stops
+                                  (0.9 = 90%, counted on the longer trip),
+                                  with the same route, direction and days. 1
+                                  turns this off.  [default: 0.9; 0.0<=x<=1.0]
+  --include-key-changes           With --id-matching, report a matched row
+                                  whose key changed (a new trip_id, stop_id,
+                                  shape_id...) as a change of its key columns,
+                                  in every file. Off by default: a regenerated
+                                  ID alone is not a change.
+  --as-of YYYY-MM-DD              Notable highlights: report service days
+                                  without trips from this date on (YYYY-MM-
+                                  DD). Default: today.
+  --highlight-stop-moved-m METRES
+                                  Notable highlights: report stops that moved
+                                  at least this far.  [default: 50.0; x>=0.0]
+  --highlight-shape-moved-m METRES
+                                  Notable highlights: report shapes that moved
+                                  at least this far.  [default: 50.0; x>=0.0]
+  --shape-geometry                Draw every changed, added and deleted shape
+                                  on maps in the HTML report's Shapes tab.
+                                  Needs --id-matching and the HTML report.
+  --html PATH                     Where to write the HTML report. Default:
+                                  next to --output with an .html suffix, or
+                                  gtfs-diff.html when printing to stdout.
+  --no-html                       Do not write the HTML report.
+  --html-cap INTEGER RANGE        Max rows of each kind of change (added,
+                                  deleted, modified) per file shown in the
+                                  HTML report, and example rows per modified
+                                  column. Applied on top of --cap.  [default:
+                                  100; x>=0]
   --help                          Show this message and exit.
 ```
 
@@ -151,6 +197,30 @@ gtfs-diff --no-duckdb base.zip new.zip
 # Omit per-column modification statistics
 gtfs-diff --no-column-stats base.zip new.zip
 
+# Diff by ID only, without matching entities by content
+gtfs-diff --no-id-matching base.zip new.zip
+
+# Let matched trips move by up to 30 minutes (default 15; 0 = identical times only)
+gtfs-diff --trip-max-shift 30 base.zip new.zip
+
+# Pair trips that kept at least 80% of their stops (default 90%; 1 = off)
+gtfs-diff --trip-min-shared-stops 0.8 base.zip new.zip
+
+# Report days without trips from a given date (default today), and stops or
+# shapes that moved 100 m or more (default 50)
+gtfs-diff -o diff.json --as-of 2026-06-25 --highlight-stop-moved-m 100 \
+          --highlight-shape-moved-m 100 base.zip new.zip
+
+# Also list regenerated IDs of matched entities as changes (off by default)
+gtfs-diff --include-key-changes base.zip new.zip
+
+# Also draw changed shapes on maps in the HTML report (diff.html)
+gtfs-diff -o diff.json --shape-geometry base.zip new.zip
+
+# Choose where the HTML report goes, or skip it
+gtfs-diff -o diff.json --html report.html base.zip new.zip
+gtfs-diff -o diff.json --no-html base.zip new.zip
+
 # With feed download timestamps
 gtfs-diff --base-downloaded-at 2024-01-01T00:00:00Z \
           --new-downloaded-at 2024-06-01T00:00:00Z \
@@ -173,6 +243,9 @@ def diff_feeds(
     files: Iterable[str] | None = None,
     large_file_threshold_bytes: int | None = 52428800,
     column_stats: bool = True,
+    id_matching: bool = True,
+    trip_max_shift_minutes: float = 15.0,
+    include_key_changes: bool = False,
 ) -> GtfsDiff
 ```
 
@@ -188,6 +261,20 @@ def diff_feeds(
 | `files` | `Iterable[str] \| None` | Optional file list. Local feeds compare all discoverable files when omitted or only these files when supplied; HTTP(S) folder URLs probe all known supported GTFS files when omitted or these exact files when supplied. Non-listable folders are supported when individual files are public; missing files that return 403/404 are skipped |
 | `large_file_threshold_bytes` | `int \| None` | Files whose larger side is at least this many uncompressed bytes are routed to the built-in DuckDB backend (default `52428800`, 50 MB). Pass `None` to disable DuckDB entirely and always use the in-memory engine; pass a smaller number to route more eligible files |
 | `column_stats` | `bool` | When `True` (default), include per-column modification counts and percentages in each modified file's `stats.column_stats`. Pass `False` to omit that per-column breakdown; `stats.rows_changed_percentage` is still computed |
+| `id_matching` | `bool` | When `True` (default), match entities by content before comparing rows. How each entity was matched is on `run_diff(...).matching`, not in the JSON. See [docs/id_matching.md](docs/id_matching.md) |
+| `trip_max_shift_minutes` | `float` | With `id_matching`, also pair trips whose times moved by at most this many minutes at every stop (default `15`); `0` pairs only trips with identical times |
+| `include_key_changes` | `bool` | With `id_matching`, also report a new ID of a matched entity as a change of the key columns, in every file (default `False`: regenerated IDs alone are not changes) |
+
+`run_diff()` takes the same arguments, plus `shape_geometry`,
+`trip_min_shared_stops`, `as_of`, `highlight_stop_moved_m` and
+`highlight_shape_moved_m` (see the CLI options). It returns a `DiffRun`:
+
+| Field | Holds |
+|---|---|
+| `diff` | The diff, as written to the JSON (with its `highlights`) |
+| `matching` | How each entity was matched |
+| `shape_changes` | With `shape_geometry`, the shapes the report draws |
+| `parameters`, `files_unchanged`, `new_identifiers`, `duration_seconds` | What the report shows beyond the JSON |
 
 ```python
 # URL feeds can auto-discover known supported GTFS files
@@ -222,6 +309,8 @@ result = diff_feeds("base.zip", "new.zip", large_file_threshold_bytes=None)
 | `summary` | `Summary` | Aggregate counts of changed files, rows, columns |
 | `file_diffs` | `list[FileDiff]` | Per-file diff records |
 
+The JSON follows the GTFS Diff v2 schema exactly, notable highlights included.
+
 ## Supported GTFS Files
 
 | File | Primary Key |
@@ -240,7 +329,7 @@ result = diff_feeds("base.zip", "new.zip", large_file_threshold_bytes=None)
 | `transfers.txt` | `from_stop_id`, `to_stop_id`, `from_route_id`, `to_route_id`, `from_trip_id`, `to_trip_id` |
 | `pathways.txt` | `pathway_id` |
 | `levels.txt` | `level_id` |
-| `feed_info.txt` | *(all columns — single-row file)* |
+| `feed_info.txt` | `feed_publisher_name`, `feed_publisher_url` |
 | `translations.txt` | `table_name`, `field_name`, `language`, `record_id`, `record_sub_id`, `field_value` |
 | `attributions.txt` | `attribution_id` |
 | `areas.txt` | `area_id` |

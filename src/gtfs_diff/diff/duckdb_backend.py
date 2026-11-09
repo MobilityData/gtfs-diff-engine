@@ -1,14 +1,14 @@
 """DuckDB-backed diff for very large GTFS files.
 
 This module mirrors the per-file "modified" diff produced by
-:func:`gtfs_diff.engine._diff_file_modified`, but offloads the heavy
+:func:`gtfs_diff.diff.files._diff_file_modified`, but offloads the heavy
 set-arithmetic and row scanning to DuckDB (a C++ engine that spills to disk)
 so that files with millions of rows can be compared without loading every row
 into a Python dict.
 
 It is intentionally only used for the *common* case of a file that exists in
 both feeds and has a simple, fully-present, explicit primary key (the routing
-guard in :mod:`gtfs_diff.engine` enforces this). All other cases —
+guard in :mod:`gtfs_diff.diff.files` enforces this). All other cases —
 added/deleted files, empty/optional primary keys, id-churn edge cases — stay on
 the in-memory engine, whose behavior this module reuses helper-by-helper to
 guarantee byte-identical output.
@@ -34,20 +34,10 @@ import contextlib
 import os
 import shutil
 import tempfile
+from typing import TYPE_CHECKING
 
-from .csv_utils import _is_url, _read_headers, _values_differ
-from .diff_helpers import (
-    _assemble_modified_file_diff,
-    _build_identifier_and_raw,
-    _build_not_compared_diff,
-    _compute_ignored_columns,
-    _detect_id_churn,
-    _diff_columns,
-    _duplicate_primary_key_reason,
-    _shared_columns,
-    _split_row_changes_cap,
-)
-from .models import (
+from ..feeds.csv_utils import _is_url, _read_headers, _values_differ
+from ..models import (
     FieldChange,
     FileDiff,
     FileSummary,
@@ -55,7 +45,24 @@ from .models import (
     RowDeleted,
     RowModified,
 )
-from .tracing import _trace
+from ..tracing import _trace
+from .helpers import (
+    _assemble_modified_file_diff,
+    _build_identifier_and_raw,
+    _build_not_compared_diff,
+    _compute_ignored_columns,
+    _detect_id_churn,
+    _diff_columns,
+    _duplicate_primary_key_reason,
+    _new_identifier,
+    _row_field_changes,
+    _select_modified,
+    _shared_columns,
+    _split_row_changes_cap,
+)
+
+if TYPE_CHECKING:
+    from ..matching import FileTranslation
 
 # Read modest batches when streaming candidate rows so memory stays bounded
 # regardless of how many rows differ.
@@ -149,6 +156,51 @@ def _create_table(con, table: str, path: str, clean_headers: list[str]) -> None:
     )
 
 
+def _key_prefix(column: str) -> str:
+    return "__k__" + column
+
+
+def _add_translated_keys(
+    con, translation: FileTranslation | None, new_headers: list[str]
+) -> dict[str, str]:
+    """Add a translated copy of each matched ID column to new_t.
+
+    Returns ``{column: SQL expression}`` giving the new side's comparison value
+    for every new column (``n."col"`` or its translated copy).
+    """
+    exprs = {c: f"n.{_q(c)}" for c in new_headers}
+    if translation is None:
+        return exprs
+    cols = [c for c in new_headers if translation.keys.get(c)]
+    selects, joins, params = [], [], []
+    for i, col in enumerate(cols):
+        selects.append(f"coalesce(m{i}.key, n.{_q(col)}) AS {_q(_key_prefix(col))}")
+        joins.append(f"LEFT JOIN read_parquet(?) m{i} ON m{i}.new = n.{_q(col)}")
+        params.append(translation.parquet[col])
+    if translation.sequence and {"trip_id", "stop_sequence"} <= set(new_headers):
+        # Matched trips numbered differently: the old stop_sequence by position.
+        selects.append(
+            'coalesce(sq.old_seq, n."stop_sequence") AS '
+            f"{_q(_key_prefix('stop_sequence'))}"
+        )
+        joins.append(
+            "LEFT JOIN read_parquet(?) sq "
+            'ON sq.new_trip = n."trip_id" AND sq.new_seq = n."stop_sequence"'
+        )
+        params.append(translation.sequence_parquet)
+        cols.append("stop_sequence")
+    if not cols:
+        return exprs
+    con.execute(
+        f"CREATE OR REPLACE TABLE new_t AS SELECT n.*, {', '.join(selects)} "
+        f"FROM new_t n {' '.join(joins)} ORDER BY n.__line",
+        params,
+    )
+    for col in cols:
+        exprs[col] = f"n.{_q(_key_prefix(col))}"
+    return exprs
+
+
 def _has_duplicate_pk(con, table: str, pk_cols: list[str]) -> bool:
     """Return True if *table* has more than one row for any primary-key value."""
     pk_list = ", ".join(_q(c) for c in pk_cols)
@@ -167,10 +219,15 @@ def diff_modified_duckdb(
     id_churn_threshold: float,
     not_compared_files: dict[str, str],
     column_stats: bool = True,
+    translation: FileTranslation | None = None,
+    keep: set[tuple] | None = None,
 ) -> tuple[FileDiff, FileSummary]:
     """Compute the "modified" diff for a large file using DuckDB.
 
-    The caller (``gtfs_diff.engine``) guarantees the file exists in both feeds
+    Rows whose base key is in *keep* (behind notable highlights) are kept first
+    when the cap trims the row changes.
+
+    The caller (``gtfs_diff.diff.files``) guarantees the file exists in both feeds
     and that *pk_cols* is an explicit primary key fully present in both headers.
 
     ``base_path`` / ``new_path`` may be local filesystem paths *or* ``http(s)://``
@@ -223,9 +280,11 @@ def diff_modified_duckdb(
         _trace(f"  [{file_name}] (duckdb) loading base + new...")
         _create_table(con, "base_t", base_path, base_headers)
         _create_table(con, "new_t", new_path, new_headers)
+        nk = _add_translated_keys(con, translation, new_headers)
+        new_pk = [c if nk[c] == f"n.{_q(c)}" else _key_prefix(c) for c in pk_cols]
 
         dup_base = _has_duplicate_pk(con, "base_t", pk_cols)
-        dup_new = _has_duplicate_pk(con, "new_t", pk_cols)
+        dup_new = _has_duplicate_pk(con, "new_t", new_pk)
         if dup_base or dup_new:
             # Duplicate keys mean rows can't be uniquely matched. Report the file
             # as not_compared (parity with the in-memory engine) instead of
@@ -251,7 +310,7 @@ def diff_modified_duckdb(
         total_base = con.execute("SELECT COUNT(*) FROM base_t").fetchone()[0]
         total_new = con.execute("SELECT COUNT(*) FROM new_t").fetchone()[0]
 
-        pk_join = " AND ".join(f"b.{_q(c)} = n.{_q(c)}" for c in pk_cols)
+        pk_join = " AND ".join(f"b.{_q(c)} = {nk[c]}" for c in pk_cols)
         common_count = con.execute(
             f"SELECT COUNT(*) FROM base_t b JOIN new_t n ON {pk_join}"
         ).fetchone()[0]
@@ -296,18 +355,20 @@ def diff_modified_duckdb(
 
         added_rows: list[RowAdded] = []
         deleted_rows: list[RowDeleted] = []
+        modified_rows: list[RowModified] = []
 
         # --- Modified: SQL pre-filters to raw-different rows; Python decides. ---
-        true_modified, modified_rows, column_mod_counts = _scan_modified(
+        true_modified, candidates, column_mod_counts, idx = _scan_modified(
             con,
             file_name=file_name,
             pk_cols=pk_cols,
             base_headers=base_headers,
             shared_cols=shared_cols,
-            union_columns=union_columns,
-            base_header_set=base_header_set,
             collect=include_row_changes,
             cap=cap,
+            nk=nk,
+            translation=translation,
+            keep=keep,
         )
 
         if include_row_changes:
@@ -321,6 +382,7 @@ def diff_modified_duckdb(
                 union_columns=union_columns,
                 new_header_set=new_header_set,
                 limit=added_limit,
+                pk_join=pk_join,
             )
             deleted_rows = _collect_deleted(
                 con,
@@ -329,9 +391,34 @@ def diff_modified_duckdb(
                 union_columns=union_columns,
                 base_header_set=base_header_set,
                 limit=deleted_limit,
+                pk_join=pk_join,
+                keep=keep,
             )
-            if modified_limit is not None:
-                modified_rows = modified_rows[:modified_limit]
+            modified_rows = [
+                _modified_row(
+                    c,
+                    pk_cols,
+                    base_headers,
+                    shared_cols,
+                    union_columns,
+                    base_header_set,
+                    translation,
+                    idx,
+                )
+                for c in _select_modified(
+                    candidates,
+                    modified_limit,
+                    line_of=lambda c: c[0],
+                    fields_of=lambda c: [fc.field for fc in c[2]],
+                    column_order=union_columns,
+                    first={
+                        c[0]
+                        for c in candidates
+                        if keep
+                        and tuple(c[3][idx["b__" + col]] for col in pk_cols) in keep
+                    },
+                )
+            ]
     finally:
         # Drop the per-file tables so DuckDB releases their buffers, then close
         # the connection (which also frees everything) and remove the spill dir.
@@ -379,24 +466,32 @@ def _scan_modified(
     pk_cols: list[str],
     base_headers: list[str],
     shared_cols: list[str],
-    union_columns: list[str],
-    base_header_set: set[str],
     collect: bool,
     cap: int | None,
-) -> tuple[int, list[RowModified], dict[str, int]]:
+    nk: dict[str, str] | None = None,
+    translation: FileTranslation | None = None,
+    keep: set[tuple] | None = None,
+) -> tuple[int, list[tuple], dict[str, int], dict[str, int]]:
     """Stream raw-different common rows; apply ``_values_differ`` as final arbiter.
 
-    Returns the *true* modified count, (when *collect*) up to *cap* RowModified
-    records, and per-column modification counts over the full modified set
-    (true counts, independent of *cap*). Streaming in batches keeps memory
-    bounded no matter how many rows changed.
+    Returns the *true* modified count, (when *collect*) candidate rows as
+    ``(base line, new line, field changes, raw row)``, per-column
+    modification counts over the full modified set (true counts, independent of
+    *cap*), and the raw row's column index. With a *cap*, only each column's
+    ``2 * cap`` earliest rows are kept, which is all :func:`_select_modified` can
+    pick from, so memory stays bounded no matter how many rows changed.
     """
     if not shared_cols:
-        return 0, [], {}
+        return 0, [], {}, {}
 
-    pk_join = " AND ".join(f"b.{_q(c)} = n.{_q(c)}" for c in pk_cols)
+    nk = nk or {c: f"n.{_q(c)}" for c in shared_cols}
+    published = translation.key_columns if translation else frozenset()
+    pk_join = " AND ".join(f"b.{_q(c)} = {nk[c]}" for c in pk_cols)
+    # A superset of the changed rows: matched IDs as translated, except key
+    # columns whose new values are reported (include_key_changes).
     distinct_pred = " OR ".join(
-        f"b.{_q(c)} IS DISTINCT FROM n.{_q(c)}" for c in shared_cols
+        f"b.{_q(c)} IS DISTINCT FROM {f'n.{_q(c)}' if c in published else nk[c]}"
+        for c in shared_cols
     )
 
     select_parts = ["b.__line AS b_line", "n.__line AS n_line"]
@@ -413,43 +508,81 @@ def _scan_modified(
     idx = {name: i for i, name in enumerate(col_names)}
 
     true_modified = 0
-    modified_rows: list[RowModified] = []
     column_mod_counts: dict[str, int] = {}
+    per_column: dict[str, list[tuple]] = {}
+    kept: list[tuple] = []  # behind notable highlights: never trimmed
+    room = None if cap is None else 2 * cap
     while True:
         batch = cur.fetchmany(_FETCH_BATCH)
         if not batch:
             break
         for row in batch:
-            field_changes = [
-                FieldChange(
-                    field=col,
-                    base_value=row[idx["b__" + col]],
-                    new_value=row[idx["n__" + col]],
+            if translation is None:
+                field_changes = [
+                    FieldChange(
+                        field=col,
+                        base_value=row[idx["b__" + col]],
+                        new_value=row[idx["n__" + col]],
+                    )
+                    for col in shared_cols
+                    if _values_differ(row[idx["b__" + col]], row[idx["n__" + col]])
+                ]
+            else:
+                field_changes = _row_field_changes(
+                    {c: row[idx["b__" + c]] for c in shared_cols},
+                    {c: row[idx["n__" + c]] for c in shared_cols},
+                    shared_cols,
+                    translation,
                 )
-                for col in shared_cols
-                if _values_differ(row[idx["b__" + col]], row[idx["n__" + col]])
-            ]
             if not field_changes:
                 continue
             true_modified += 1
             for fc in field_changes:
                 column_mod_counts[fc.field] = column_mod_counts.get(fc.field, 0) + 1
-            if not collect or (cap is not None and len(modified_rows) >= cap):
+            if not collect:
                 continue
-            b_dict = {col: row[idx["b__" + col]] for col in base_headers}
-            identifier, raw_value = _build_identifier_and_raw(
-                b_dict, pk_cols, union_columns, base_header_set
-            )
-            modified_rows.append(
-                RowModified(
-                    identifier=identifier,
-                    raw_value=raw_value,
-                    base_line_number=row[idx["b_line"]],
-                    new_line_number=row[idx["n_line"]],
-                    field_changes=field_changes,
-                )
-            )
-    return true_modified, modified_rows, column_mod_counts
+            candidate = (row[idx["b_line"]], row[idx["n_line"]], field_changes, row)
+            if keep and tuple(row[idx["b__" + c]] for c in pk_cols) in keep:
+                kept.append(candidate)
+            for fc in field_changes:
+                rows = per_column.setdefault(fc.field, [])
+                rows.append(candidate)
+                if room is not None and len(rows) > 2 * room:
+                    rows.sort(key=lambda c: c[0])
+                    del rows[room:]
+    candidates = {c[0]: c for rows in [*per_column.values(), kept] for c in rows}
+    return true_modified, list(candidates.values()), column_mod_counts, idx
+
+
+def _modified_row(
+    candidate: tuple,
+    pk_cols: list[str],
+    base_headers: list[str],
+    shared_cols: list[str],
+    union_columns: list[str],
+    base_header_set: set[str],
+    translation: FileTranslation | None,
+    idx: dict[str, int],
+) -> RowModified:
+    b_line, n_line, field_changes, row = candidate
+    b_dict = {col: row[idx["b__" + col]] for col in base_headers}
+    identifier, raw_value = _build_identifier_and_raw(
+        b_dict, pk_cols, union_columns, base_header_set
+    )
+    extra = {}
+    if translation is not None:
+        n_dict = {c: row[idx["n__" + c]] for c in shared_cols}
+        new_identifier = _new_identifier(identifier, n_dict, pk_cols)
+        if new_identifier is not None:
+            extra["new_identifier"] = new_identifier
+    return RowModified(
+        identifier=identifier,
+        raw_value=raw_value,
+        base_line_number=b_line,
+        new_line_number=n_line,
+        field_changes=field_changes,
+        **extra,
+    )
 
 
 def _collect_added(
@@ -459,11 +592,12 @@ def _collect_added(
     union_columns: list[str],
     new_header_set: set[str],
     limit: int | None,
+    pk_join: str | None = None,
 ) -> list[RowAdded]:
     """Fetch up to *limit* rows present only in the new feed."""
     if limit == 0:
         return []
-    pk_eq = " AND ".join(f"b.{_q(c)} = n.{_q(c)}" for c in pk_cols)
+    pk_eq = pk_join or " AND ".join(f"b.{_q(c)} = n.{_q(c)}" for c in pk_cols)
     cols = ", ".join(f"n.{_q(c)} AS {_q(c)}" for c in new_headers)
     sql = (
         f"SELECT n.__line AS __line, {cols} FROM new_t n "
@@ -498,19 +632,35 @@ def _collect_deleted(
     union_columns: list[str],
     base_header_set: set[str],
     limit: int | None,
+    pk_join: str | None = None,
+    keep: set[tuple] | None = None,
 ) -> list[RowDeleted]:
-    """Fetch up to *limit* rows present only in the base feed."""
+    """Fetch up to *limit* rows present only in the base feed, rows whose key
+    is in *keep* first."""
     if limit == 0:
         return []
-    pk_eq = " AND ".join(f"n.{_q(c)} = b.{_q(c)}" for c in pk_cols)
+    pk_eq = pk_join or " AND ".join(f"n.{_q(c)} = b.{_q(c)}" for c in pk_cols)
     cols = ", ".join(f"b.{_q(c)} AS {_q(c)}" for c in base_headers)
+    first = ""
+    if keep:
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE keep_t ("
+            + ", ".join(f"{_q(c)} VARCHAR" for c in pk_cols)
+            + ")"
+        )
+        con.executemany(
+            f"INSERT INTO keep_t VALUES ({', '.join('?' for _ in pk_cols)})",
+            [list(k) for k in keep],
+        )
+        match = " AND ".join(f"k.{_q(c)} = b.{_q(c)}" for c in pk_cols)
+        first = f"EXISTS (SELECT 1 FROM keep_t k WHERE {match}) DESC, "
     sql = (
-        f"SELECT b.__line AS __line, {cols} FROM base_t b "
+        f"SELECT * FROM (SELECT b.__line AS __line, {cols} FROM base_t b "
         f"WHERE NOT EXISTS (SELECT 1 FROM new_t n WHERE {pk_eq})"
-        f" ORDER BY b.__line"
+        f" ORDER BY {first}b.__line"
+        + (f" LIMIT {int(limit)}" if limit is not None else "")
+        + ") ORDER BY __line"
     )
-    if limit is not None:
-        sql += f" LIMIT {int(limit)}"
 
     cur = con.execute(sql)
     idx = {d[0]: i for i, d in enumerate(cur.description)}

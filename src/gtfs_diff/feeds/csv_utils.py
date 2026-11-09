@@ -8,9 +8,12 @@ from __future__ import annotations
 import csv
 import io
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
-from .gtfs_definitions import get_optional_primary_key_columns
+from ..gtfs_definitions import get_optional_primary_key_columns
+
+if TYPE_CHECKING:
+    from ..matching import FileTranslation
 
 
 def _is_url(path: str | Path) -> bool:
@@ -141,6 +144,7 @@ def _read_csv_index(
     pk_columns: list[str] | None = None,
     file_name: str = "<unknown>",
     side: str | None = None,
+    translation: FileTranslation | None = None,
 ) -> tuple[list[str], dict[tuple, tuple[int, str]]]:
     """Stream a CSV file and build a primary-key → (line_number, raw_csv_string) index.
 
@@ -152,6 +156,8 @@ def _read_csv_index(
         side:       Which feed this stream belongs to (``"base"`` / ``"new"``),
                     recorded on a raised :class:`DuplicatePrimaryKeyError` so the
                     not_compared reason can name the offending feed.
+        translation: For the new feed, maps matched IDs in key columns to the
+                    base feed's IDs. The stored row keeps the published values.
 
     Returns:
         headers: Stripped column names from the header row.
@@ -192,7 +198,10 @@ def _read_csv_index(
             row = row + [""] * (n - len(row))
         row_vals = row[:n]
         row_dict = dict(zip(headers, row_vals, strict=True))
-        pk_tuple = tuple(row_dict.get(col, "") for col in effective_pk)
+        if translation is None:
+            pk_tuple = tuple(row_dict.get(col, "") for col in effective_pk)
+        else:
+            pk_tuple = tuple(translation.row_key(col, row_dict) for col in effective_pk)
 
         if pk_tuple in index:
             raise DuplicatePrimaryKeyError(

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
 
 
 class UnsupportedFile(BaseModel):
@@ -19,6 +19,10 @@ class UnsupportedFile(BaseModel):
     present_in: Literal["base", "new", "both"] = Field(
         ..., description="Which archive(s) contain this file."
     )
+
+
+class Counts(RootModel[int]):
+    root: int = Field(..., ge=1)
 
 
 class HighlightReference(BaseModel):
@@ -311,7 +315,7 @@ class Highlights(BaseModel):
         None,
         description="Settings the producer used to find the highlights (e.g. distance thresholds, the date from which service days are checked). Producer-specific.",
     )
-    counts: dict[str, int] = Field(
+    counts: dict[str, Counts] = Field(
         ...,
         description="True (uncapped) number of highlights per code. Codes with no highlights are omitted.",
     )
@@ -363,6 +367,7 @@ class GtfsDiff(BaseModel):
 
 __all__ = [
     "UnsupportedFile",
+    "Counts",
     "HighlightReference",
     "ColumnEntry",
     "FeedSource",

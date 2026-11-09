@@ -334,7 +334,7 @@ def main(
         click.echo(json_str)
 
     if result.highlights is not None:
-        found = sum(result.highlights.counts.values())
+        found = sum(result.highlights.model_dump(mode="json")["counts"].values())
         click.echo(f"{found} notable highlights", err=True)
 
     stem = output.with_suffix("") if output is not None else Path("gtfs-diff")

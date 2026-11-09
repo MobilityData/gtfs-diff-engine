@@ -69,7 +69,9 @@ def render_html(
         "caps": {"rows": row_cap, "shapes": shape_cap, "points": HTML_SHAPE_POINTS},
         "shapes": _shapes_payload(run.shape_changes, shape_cap, shown),
         "highlights": shown,
-        "highlight_counts": found.counts if found is not None else None,
+        "highlight_counts": (
+            found.model_dump(mode="json")["counts"] if found is not None else None
+        ),
         "highlight_parameters": found.parameters if found is not None else None,
         "settings": settings_rows(run.parameters, row_cap),
         "constants": constants(),

@@ -221,31 +221,32 @@ class TripsMixin:
                     FROM old_part_key o JOIN new_part_key n USING (key)
                     WHERE abs(n.first_time - o.first_time) <= {limit}
                 ),
-                grouped AS (
+                -- A shared stop called before the one it followed breaks the
+                -- order, and counts as a stop not shared.
+                shared_calls AS (
                     SELECT c.old_id, c.new_id, c.key, c.old_first, c.new_first,
-                           c.longer, count(*) AS n,
-                           max(abs(nc.t - oc.t)) AS shift_s,
-                           list(oc.seq ORDER BY nc.seq) AS seqs
+                           c.longer, abs(nc.t - oc.t) AS gap,
+                           oc.seq < lag(oc.seq) OVER (
+                               PARTITION BY c.old_id, c.new_id ORDER BY nc.seq
+                           ) AS broke
                     FROM c
                     JOIN old_part_calls oc ON oc.trip_id = c.old_id
                     JOIN new_part_calls nc ON nc.trip_id = c.new_id
                      AND nc.stop = oc.stop AND nc.visit = oc.visit
-                    GROUP BY c.old_id, c.new_id, c.key, c.old_first, c.new_first,
-                             c.longer
-                    HAVING count(*) / c.longer >= {self.min_shared_stops}
-                       AND max(abs(nc.t - oc.t)) <= {limit}
                 ),
-                -- A shared stop called before the one it followed breaks the
-                -- order, and counts as a stop not shared.
+                grouped AS (
+                    SELECT old_id, new_id, key, old_first, new_first, longer,
+                           count(*) AS n, max(gap) AS shift_s,
+                           count(*) FILTER (WHERE broke) AS breaks
+                    FROM shared_calls
+                    GROUP BY old_id, new_id, key, old_first, new_first, longer
+                    HAVING count(*) / longer >= {self.min_shared_stops}
+                       AND max(gap) <= {limit}
+                ),
                 scored AS (
                     SELECT old_id, new_id, key, old_first, new_first, longer,
                            n / longer AS shared, shift_s
-                    FROM (
-                        SELECT *, len(list_filter(range(1, len(seqs)),
-                                                  i -> seqs[i + 1] < seqs[i]))
-                                      AS breaks
-                        FROM grouped
-                    )
+                    FROM grouped
                     WHERE (n - breaks) / longer >= {self.min_shared_stops}
                       AND (n < longer OR breaks > 0)
                 )

@@ -4,10 +4,12 @@ GTFS file definitions, primary keys, and schema constants.
 Design decisions:
 - Primary keys follow the official GTFS Static specification. Where the spec defines
   a composite primary key, all constituent columns are listed.
-- Files with an empty primary key list ([]) have no single identifying column (e.g.
-  feed_info.txt is a single-row file, agency.txt allows omitting agency_id when there
-  is only one agency). For these, the diff engine falls back to treating ALL columns
-  collectively as the row identity.
+- Files with an empty primary key list ([]) have no identifying column. For these,
+  the diff engine falls back to treating ALL columns collectively as the row
+  identity. No file uses it at present.
+- feed_info.txt has no key in the spec. It is keyed by its two required columns,
+  feed_publisher_name and feed_publisher_url, so a new feed_version or new dates
+  show as a modified row rather than a deleted and an added one.
 - Files with no known primary key or that are not CSV (e.g. geojson locations) are
   simply absent from GTFS_PRIMARY_KEYS and therefore absent from SUPPORTED_FILES.
   Callers can check ``get_primary_key`` returning None to detect unsupported files.
@@ -49,7 +51,7 @@ GTFS_PRIMARY_KEYS: dict[str, list[str]] = {
     "pathways.txt": ["pathway_id"],
     "levels.txt": ["level_id"],
     # Feed metadata
-    "feed_info.txt": [],  # single-row file, no primary key
+    "feed_info.txt": ["feed_publisher_name", "feed_publisher_url"],
     "translations.txt": [
         "table_name",
         "field_name",

@@ -7,16 +7,15 @@
 #   • A local folder (/path/to/gtfs-dir/)
 #
 # Usage:
-#   ./scripts/compare_feeds.sh <BASE_FEED> <NEW_FEED> [OPTIONS]
+#   ./scripts/compare_feeds.sh <BASE_FEED> <NEW_FEED> [GTFS-DIFF OPTIONS]
 #
 # Arguments:
 #   BASE_FEED   Base (old) GTFS feed — URL, local zip, or local folder
 #   NEW_FEED    New GTFS feed        — URL, local zip, or local folder
 #
 # Options:
-#   -o, --output FILE    Write JSON diff to FILE (default: stdout)
-#   -c, --cap    INT     Max row changes per file (default: no cap; 0 = counts only)
-#   --no-pretty          Compact JSON output (default: pretty-printed)
+#   Everything after the two feeds is passed to gtfs-diff as is.
+#   Run `gtfs-diff --help` for the full list.
 #   -h, --help           Show this help message
 #
 # Examples:
@@ -25,11 +24,11 @@
 #       https://example.com/gtfs-jan.zip \
 #       https://example.com/gtfs-feb.zip
 #
-#   # Mix of local zip and remote URL
+#   # Mix of local zip and remote URL, with shape maps in the HTML report
 #   ./scripts/compare_feeds.sh \
 #       /data/gtfs-jan.zip \
 #       https://example.com/gtfs-feb.zip \
-#       --output diff.json --cap 1000
+#       --output diff.json --cap 1000 --shape-geometry
 #
 #   # Two local folders
 #   ./scripts/compare_feeds.sh \
@@ -90,30 +89,13 @@ resolve_feed() {
 # Argument parsing
 # --------------------------------------------------------------------------- #
 
-BASE_FEED=""
-NEW_FEED=""
-OUTPUT_FILE=""
-CAP=""
-PRETTY="--pretty"
+[[ $# -eq 0 || "$1" == "-h" || "$1" == "--help" ]] && usage
+[[ $# -ge 2 ]] || die "BASE_FEED and NEW_FEED are required. Run with --help for usage."
+[[ "$1" != -* && "$2" != -* ]] || die "Give BASE_FEED and NEW_FEED first, then the gtfs-diff options."
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -h|--help) usage ;;
-        -o|--output) OUTPUT_FILE="$2"; shift 2 ;;
-        -c|--cap)    CAP="$2";         shift 2 ;;
-        --no-pretty) PRETTY="--no-pretty"; shift ;;
-        -*)          die "Unknown option: $1" ;;
-        *)
-            if   [[ -z "$BASE_FEED" ]]; then BASE_FEED="$1"
-            elif [[ -z "$NEW_FEED"  ]]; then NEW_FEED="$1"
-            else die "Unexpected argument: $1"
-            fi
-            shift ;;
-    esac
-done
-
-[[ -n "$BASE_FEED" ]] || die "BASE_FEED is required.\nRun with --help for usage."
-[[ -n "$NEW_FEED"  ]] || die "NEW_FEED is required.\nRun with --help for usage."
+BASE_FEED="$1"
+NEW_FEED="$2"
+shift 2
 
 # --------------------------------------------------------------------------- #
 # Dependency checks
@@ -136,21 +118,8 @@ BASE_PATH="$(resolve_feed "base" "$BASE_FEED" "$WORK_DIR/base.zip")"
 NEW_PATH="$(resolve_feed "new"  "$NEW_FEED"  "$WORK_DIR/new.zip")"
 
 # --------------------------------------------------------------------------- #
-# Build gtfs-diff command
-# --------------------------------------------------------------------------- #
-
-CMD=(gtfs-diff "$BASE_PATH" "$NEW_PATH" "$PRETTY")
-
-[[ -n "$CAP"         ]] && CMD+=(--cap "$CAP")
-[[ -n "$OUTPUT_FILE" ]] && CMD+=(--output "$OUTPUT_FILE")
-
-# --------------------------------------------------------------------------- #
 # Run diff
 # --------------------------------------------------------------------------- #
 
 echo "🔍 Running diff..." >&2
-"${CMD[@]}"
-
-if [[ -n "$OUTPUT_FILE" ]]; then
-    echo "✔  Diff written to: $OUTPUT_FILE" >&2
-fi
+gtfs-diff "$BASE_PATH" "$NEW_PATH" "$@"

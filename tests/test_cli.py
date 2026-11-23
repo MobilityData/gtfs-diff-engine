@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
-from gtfs_diff import engine_duckdb
 from gtfs_diff.cli import main
+from gtfs_diff.diff import duckdb_backend as engine_duckdb
 from tests.helpers import write_zip
 
 STOPS_HEADER = "stop_id,stop_name,stop_lat,stop_lon\n"
@@ -17,6 +18,12 @@ TINY_BASE_FILES = {"stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n"}
 TINY_NEW_FILES = {
     "stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\nS2,Stop Two,3.0,4.0\n"
 }
+
+
+@pytest.fixture(autouse=True)
+def _run_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI writes its HTML report to the working directory by default."""
+    monkeypatch.chdir(tmp_path)
 
 
 def _make_feeds(tmp_path: Path):
@@ -80,10 +87,29 @@ class TestCapOption:
     def test_cap_stored_in_metadata(self, tmp_path: Path):
         base, new = _make_feeds(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [str(base), str(new), "--cap", "5"])
+        result = runner.invoke(main, [str(base), str(new), "--cap", "150"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.stdout)
-        assert data["metadata"]["row_changes_cap_per_file"] == 5
+        assert data["metadata"]["row_changes_cap_per_file"] == 150
+
+    def test_no_cap_is_null_in_metadata(self, tmp_path: Path):
+        """The schema requires the field: null means no cap."""
+        base, new = _make_feeds(tmp_path)
+        result = CliRunner().invoke(main, [str(base), str(new), "--no-pretty"])
+        assert result.exit_code == 0, result.output
+        metadata = json.loads(result.stdout)["metadata"]
+        assert metadata["row_changes_cap_per_file"] is None
+        assert list(metadata)[:3] == [
+            "schema_version",
+            "generated_at",
+            "row_changes_cap_per_file",
+        ]
+
+    def test_cap_below_minimum_is_rejected(self, tmp_path: Path):
+        base, new = _make_feeds(tmp_path)
+        result = CliRunner().invoke(main, [str(base), str(new), "--cap", "10"])
+        assert result.exit_code == 2
+        assert "must be 0 or at least 100" in result.output
 
 
 class TestMissingPrimaryKeyNotCompared:

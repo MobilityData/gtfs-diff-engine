@@ -10,25 +10,28 @@ from pathlib import Path
 
 import pytest
 
-from gtfs_diff import engine_duckdb
-from gtfs_diff.csv_utils import DuplicatePrimaryKeyError as CsvDuplicatePrimaryKeyError
-from gtfs_diff.diff_helpers import _duplicate_primary_key_reason, _split_row_changes_cap
-from gtfs_diff.engine import (
+from gtfs_diff.diff import duckdb_backend as engine_duckdb
+from gtfs_diff.diff.duckdb_backend import DUCKDB_TMPDIR_ENV, _resolve_spill_base
+from gtfs_diff.diff.files import _eligible_for_duckdb, _maybe_diff_modified_duckdb
+from gtfs_diff.diff.helpers import _duplicate_primary_key_reason, _split_row_changes_cap
+from gtfs_diff.engine import diff_feeds
+from gtfs_diff.feeds.csv_utils import (
     DuplicatePrimaryKeyError,
-    FeedFileMeta,
     MissingPrimaryKeyError,
-    _eligible_for_duckdb,
+    _is_url,
+    _read_csv_index,
+)
+from gtfs_diff.feeds.csv_utils import (
+    DuplicatePrimaryKeyError as CsvDuplicatePrimaryKeyError,
+)
+from gtfs_diff.feeds.sources import (
+    FeedFileMeta,
     _http_exists,
     _http_exists_via_get,
-    _is_url,
     _join_url,
     _materialized_path,
-    _maybe_diff_modified_duckdb,
     _open_remote_feed,
-    _read_csv_index,
-    diff_feeds,
 )
-from gtfs_diff.engine_duckdb import DUCKDB_TMPDIR_ENV, _resolve_spill_base
 from gtfs_diff.gtfs_definitions import (
     get_foreign_keys,
     get_optional_primary_key_columns,
@@ -418,9 +421,12 @@ class TestRemoteAndFileFilter:
             "https://x/base/stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
             "https://x/new/stops.txt": STOPS_HEADER + "S1,Stop One Renamed,1.0,2.0\n",
         }
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", lambda url: url in store)
         monkeypatch.setattr(
-            "gtfs_diff.engine._http_get_text", lambda url: io.StringIO(store[url])
+            "gtfs_diff.feeds.sources._http_exists", lambda url: url in store
+        )
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources._http_get_text",
+            lambda url: io.StringIO(store[url]),
         )
 
         result = diff_feeds("https://x/base", "https://x/new", files=["stops.txt"])
@@ -441,9 +447,12 @@ class TestRemoteAndFileFilter:
             "https://x/base/stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
             "https://x/new/routes.txt": "route_id,route_short_name\nR1,Route 1\n",
         }
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", lambda url: url in store)
         monkeypatch.setattr(
-            "gtfs_diff.engine._http_get_text", lambda url: io.StringIO(store[url])
+            "gtfs_diff.feeds.sources._http_exists", lambda url: url in store
+        )
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources._http_get_text",
+            lambda url: io.StringIO(store[url]),
         )
 
         result = diff_feeds(
@@ -465,9 +474,12 @@ class TestRemoteAndFileFilter:
             "https://x/base/routes.txt": routes,
             "https://x/new/routes.txt": routes,
         }
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", lambda url: url in store)
         monkeypatch.setattr(
-            "gtfs_diff.engine._http_get_text", lambda url: io.StringIO(store[url])
+            "gtfs_diff.feeds.sources._http_exists", lambda url: url in store
+        )
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources._http_get_text",
+            lambda url: io.StringIO(store[url]),
         )
 
         result = diff_feeds("https://x/base", "https://x/new")
@@ -483,9 +495,12 @@ class TestRemoteAndFileFilter:
             "https://x/base/stops.txt": STOPS_HEADER + "S1,Stop One,1.0,2.0\n",
             "https://x/new/stops.txt": STOPS_HEADER + "S1,Stop One Renamed,1.0,2.0\n",
         }
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", lambda url: url in store)
         monkeypatch.setattr(
-            "gtfs_diff.engine._http_get_text", lambda url: io.StringIO(store[url])
+            "gtfs_diff.feeds.sources._http_exists", lambda url: url in store
+        )
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources._http_get_text",
+            lambda url: io.StringIO(store[url]),
         )
 
         result = diff_feeds("https://x/base", "https://x/new")
@@ -511,9 +526,10 @@ class TestRemoteAndFileFilter:
             probed.append(url)
             return url in store
 
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", exists)
+        monkeypatch.setattr("gtfs_diff.feeds.sources._http_exists", exists)
         monkeypatch.setattr(
-            "gtfs_diff.engine._http_get_text", lambda url: io.StringIO(store[url])
+            "gtfs_diff.feeds.sources._http_get_text",
+            lambda url: io.StringIO(store[url]),
         )
 
         result = diff_feeds("https://x/base", "https://x/new", files=["stops.txt"])
@@ -540,7 +556,9 @@ class TestHttpExistsProbing:
             calls.append(req.get_method())
             return _UrlopenResponse()
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         assert _http_exists("https://x/feed/stops.txt") is True
         assert calls == ["HEAD"]
@@ -555,7 +573,9 @@ class TestHttpExistsProbing:
             calls.append(req.get_method())
             raise self._http_error(url, 404, "Not Found")
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         assert _http_exists(url) is False
         assert calls == ["HEAD"]
@@ -570,7 +590,9 @@ class TestHttpExistsProbing:
             calls.append((req.get_method(), req.get_header("Range")))
             raise self._http_error(url, 403, "Forbidden")
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         assert _http_exists(url) is False
         assert calls == [("HEAD", None), ("GET", "bytes=0-0")]
@@ -589,7 +611,9 @@ class TestHttpExistsProbing:
             assert method == "GET"
             return _UrlopenResponse()
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         assert _http_exists(url) is True
         assert calls == [("HEAD", None), ("GET", "bytes=0-0")]
@@ -602,7 +626,9 @@ class TestHttpExistsProbing:
             calls.append(req.get_method())
             raise self._http_error(url, 401, "Unauthorized")
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         assert _http_exists(url) is False
         assert calls == ["HEAD", "GET"]
@@ -617,7 +643,9 @@ class TestHttpExistsProbing:
             calls.append(req.get_method())
             raise self._http_error(url, 410, "Gone")
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         assert _http_exists(url) is False
         assert _http_exists_via_get(url) is False
@@ -631,7 +659,9 @@ class TestHttpExistsProbing:
             calls.append(req.get_method())
             raise self._http_error(url, 500, "Internal Server Error")
 
-        monkeypatch.setattr("gtfs_diff.engine.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources.urllib.request.urlopen", fake_urlopen
+        )
 
         with pytest.raises(urllib.error.HTTPError) as exc_info:
             _http_exists(url)
@@ -1195,14 +1225,14 @@ class TestForeignKeyIgnoredColumns:
 
 class TestProcessingOrder:
     def test_parents_precede_children(self):
-        from gtfs_diff.engine import _processing_order
+        from gtfs_diff.diff.helpers import _processing_order
 
         order = _processing_order(["trips.txt", "shapes.txt", "stop_times.txt"])
         assert order.index("shapes.txt") < order.index("trips.txt")
         assert order.index("trips.txt") < order.index("stop_times.txt")
 
     def test_missing_parent_is_ignored(self):
-        from gtfs_diff.engine import _processing_order
+        from gtfs_diff.diff.helpers import _processing_order
 
         # routes.txt absent; ordering still works and stays deterministic.
         order = _processing_order(["trips.txt", "shapes.txt"])
@@ -2553,8 +2583,10 @@ class TestDuckDBRemoteUrl:
     """The DuckDB backend reads remote files in place via httpfs (no download)."""
 
     def test_open_remote_feed_sets_url_on_meta(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", lambda url: True)
-        monkeypatch.setattr("gtfs_diff.engine._http_content_length", lambda url: 12_345)
+        monkeypatch.setattr("gtfs_diff.feeds.sources._http_exists", lambda url: True)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources._http_content_length", lambda url: 12_345
+        )
         handle = _open_remote_feed("https://x/base", ["stops.txt"])
         meta = handle.meta["stops.txt"]
         assert meta.url == "https://x/base/stops.txt"
@@ -2593,13 +2625,15 @@ class TestDuckDBRemoteUrl:
     ):
         from gtfs_diff.models import FileDiff, FileStats, FileSummary
 
-        monkeypatch.setattr("gtfs_diff.engine._http_exists", lambda url: True)
-        monkeypatch.setattr("gtfs_diff.engine._http_content_length", lambda url: 10_000)
+        monkeypatch.setattr("gtfs_diff.feeds.sources._http_exists", lambda url: True)
+        monkeypatch.setattr(
+            "gtfs_diff.feeds.sources._http_content_length", lambda url: 10_000
+        )
 
         def no_download(url: str, dest: str) -> None:
             raise AssertionError("remote DuckDB path must not download to a temp file")
 
-        monkeypatch.setattr("gtfs_diff.engine._http_stream_to_file", no_download)
+        monkeypatch.setattr("gtfs_diff.feeds.sources._http_stream_to_file", no_download)
 
         captured: dict = {}
 

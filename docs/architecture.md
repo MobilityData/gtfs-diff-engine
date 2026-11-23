@@ -8,12 +8,24 @@
 
 ## Module Structure
 
+The package has one folder per part of the tool:
+
 | Module | Responsibility |
 |---|---|
-| `engine.py` | Core diff logic: feed opener, CSV indexing, per-file diff, public `diff_feeds()` function |
-| `models.py` | Pydantic v2 data models for the GTFS Diff v2 output format (`GtfsDiff`, `FileDiff`, `RowChanges`, etc.) |
+| `cli.py` | Click-based CLI entry point (`gtfs-diff`); wraps `run_diff()` and writes the JSON and the HTML report |
+| `engine.py` | Kept so `from gtfs_diff.engine import diff_feeds` keeps working; re-exports the public API |
+| `models.py` | Pydantic v2 data models for the GTFS Diff v2 output format (`GtfsDiff`, `FileDiff`, `RowChanges`, etc.), generated from the schema |
 | `gtfs_definitions.py` | Static registry of supported GTFS files, their primary keys, foreign-key relationships, and id-churn thresholds; `get_primary_key()` / `get_foreign_keys()` / `get_id_churn_threshold()` helpers |
-| `cli.py` | Click-based CLI entry point (`gtfs-diff`); thin wrapper around `diff_feeds()` |
+| `feeds/sources.py` | Opening feeds: zip archives, folders and public HTTP(S) folder URLs |
+| `feeds/csv_utils.py` | CSV header reading, key indexing and value comparison |
+| `diff/run.py` | `diff_feeds()`, `run_diff()` and `DiffRun`: matching, then every file, then the summary |
+| `diff/files.py` | The diff of one file (added, deleted or modified), in memory, routing large files to DuckDB |
+| `diff/duckdb_backend.py` | The DuckDB diff for very large files |
+| `diff/helpers.py` | Helpers both backends share: file order, column diff, id churn, field changes, caps, stats |
+| `matching/` | ID matching in DuckDB: `core.py`, `entities.py` (agencies, stops, routes, services), `trips.py`, `shapes.py`. See [id_matching.md](id_matching.md) |
+| `highlights.py` | Notable highlights, found from the matching tables. See [highlights.md](highlights.md) |
+| `geometry.py` | Exact distances from points to lines, shared by the highlights and the report |
+| `report/` | The offline HTML report: `html.py` (page data), `shape_points.py` (points and distances for the shape maps), `template.html`. See [html_report.md](html_report.md) |
 
 ## Feed Sources
 
@@ -131,9 +143,9 @@ Each file is diffed on its own short-lived in-memory DuckDB connection. The two 
 
 ## Change Statistics
 
-Modified files include per-file row-change statistics and, by default, a per-column breakdown for modified rows. Both the in-memory engine (`engine.py`) and DuckDB backend (`engine_duckdb.py`) accumulate per-column modification counts while scanning the full modified set, not just the rows retained after `row_changes_cap_per_file`, so these counts are true and cap-independent.
+Modified files include per-file row-change statistics and, by default, a per-column breakdown for modified rows. Both the in-memory engine (`diff/files.py`) and DuckDB backend (`diff/duckdb_backend.py`) accumulate per-column modification counts while scanning the full modified set, not just the rows retained after `row_changes_cap_per_file`, so these counts are true and cap-independent.
 
-The shared helpers `_compute_rows_changed_percentage` and `_build_column_stats` live in `diff_helpers.py`. They centralise the formulas for `rows_changed_percentage` and `column_stats`, guaranteeing parity between the two backends. The `column_stats` toggle gates only the per-column list; `rows_changed_percentage` is always computed for modified files.
+The shared helpers `_compute_rows_changed_percentage` and `_build_column_stats` live in `diff/helpers.py`. They centralise the formulas for `rows_changed_percentage` and `column_stats`, guaranteeing parity between the two backends. The `column_stats` toggle gates only the per-column list; `rows_changed_percentage` is always computed for modified files.
 
 ## "Not Compared" Files
 
@@ -266,7 +278,7 @@ Processing happens in dependency order, but the final `file_diffs` and
 
 ### Files with no explicit primary key
 
-`feed_info.txt` is a single-row file and `agency.txt` allows omitting `agency_id` when there is only one agency. Both are defined with an empty primary key list (`[]`) in `GTFS_PRIMARY_KEYS`. When the engine encounters an empty PK definition it falls back to using **all base-feed columns** as a composite key:
+A file with an empty primary key (`[]`) in `GTFS_PRIMARY_KEYS` is keyed by **all its columns**. No file uses this now. `feed_info.txt` has no key in GTFS, so it is keyed by `feed_publisher_name` and `feed_publisher_url`: a new `feed_version` shows as a modified row.
 
 ```python
 if len(pk_def) == 0:
@@ -297,11 +309,15 @@ basename = member.rsplit("/", 1)[-1]
 
 ## Cap and Truncation
 
-When `row_changes_cap_per_file` is set to a positive integer `N`, row changes are filled in priority order until the cap is reached:
+With a cap `N`, the kinds of change (added, deleted, modified) share `N`
+evenly; what one kind doesn't use goes to the others.
 
-1. **Added** rows (up to `N`)
-2. **Deleted** rows (up to `N − len(added)`)
-3. **Modified** rows (up to `N − len(added) − len(deleted)`)
+- Added and deleted rows: the earliest in the file.
+- Modified rows: the changed columns take turns picking their earliest row, so
+  every changed column has examples (`_select_modified`).
+
+The CLI requires a cap of 0 or at least 100, more than any GTFS file has
+columns. Both backends apply the same rule.
 
 When `cap=0`, row-level detail is omitted entirely (column diffs and true change counts are still computed).
 

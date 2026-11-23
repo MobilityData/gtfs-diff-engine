@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
 
 
 class UnsupportedFile(BaseModel):
@@ -18,6 +18,25 @@ class UnsupportedFile(BaseModel):
     file_name: str = Field(..., description="File name as it appears in the archive.")
     present_in: Literal["base", "new", "both"] = Field(
         ..., description="Which archive(s) contain this file."
+    )
+
+
+class Counts(RootModel[int]):
+    root: int = Field(..., ge=1)
+
+
+class HighlightReference(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    file_name: str = Field(..., description="Name of the GTFS file.")
+    feed: Literal["base", "new"] = Field(
+        ..., description="Which feed the identifier values come from."
+    )
+    identifier: dict[str, str] = Field(
+        ...,
+        description="Primary key values of the row, or of the leading primary key columns to refer to every row they cover (e.g. shape_id for a whole shape).",
+        min_length=1,
     )
 
 
@@ -202,6 +221,30 @@ class Summary(BaseModel):
     files: list[FileSummary]
 
 
+class Highlight(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    code: str = Field(
+        ...,
+        description='Machine-readable kind of highlight (e.g. "stop_removed"). Consumers ignore codes they do not know.',
+    )
+    message: str = Field(
+        ..., description="Human-readable sentence describing the highlight."
+    )
+    files: list[str] = Field(
+        ..., description="GTFS files the highlight is about.", min_length=1
+    )
+    references: list[HighlightReference] | None = Field(
+        None,
+        description="Rows of either feed the highlight is about, so consumers can link it to file_diffs.",
+    )
+    details: dict[str, Any] | None = Field(
+        None,
+        description="Values specific to the code (e.g. a distance). Their fields are described with each code in the specification.",
+    )
+
+
 class RowChanges(BaseModel):
     model_config = ConfigDict(
         extra="allow",
@@ -255,6 +298,33 @@ class FileStats(BaseModel):
     )
 
 
+class Highlights(BaseModel):
+    """
+    Notable highlights: changes that people using the diff should check first. Optional; producers that do not look for highlights omit it.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
+    cap_per_code: int | None = Field(
+        ...,
+        description="Maximum number of items included per code. null means no cap is applied.",
+        ge=0,
+    )
+    parameters: dict[str, Any] | None = Field(
+        None,
+        description="Settings the producer used to find the highlights (e.g. distance thresholds, the date from which service days are checked). Producer-specific.",
+    )
+    counts: dict[str, Counts] = Field(
+        ...,
+        description="True (uncapped) number of highlights per code. Codes with no highlights are omitted.",
+    )
+    items: list[Highlight] = Field(
+        ...,
+        description="Highlights (capped per code), the most important first within each code.",
+    )
+
+
 class FileDiff(BaseModel):
     model_config = ConfigDict(
         extra="allow",
@@ -292,10 +362,13 @@ class GtfsDiff(BaseModel):
     metadata: Metadata
     summary: Summary
     file_diffs: list[FileDiff]
+    highlights: Highlights | None = None
 
 
 __all__ = [
     "UnsupportedFile",
+    "Counts",
+    "HighlightReference",
     "ColumnEntry",
     "FeedSource",
     "FileSummary",
@@ -309,8 +382,10 @@ __all__ = [
     "RowModified",
     "Metadata",
     "Summary",
+    "Highlight",
     "RowChanges",
     "FileStats",
+    "Highlights",
     "FileDiff",
     "GtfsDiff",
 ]

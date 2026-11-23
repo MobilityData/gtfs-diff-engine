@@ -110,8 +110,11 @@ Options:
                                   Match agencies, stops, routes, services,
                                   trips and shapes by content before comparing
                                   rows, so renamed or regenerated IDs are
-                                  diffed as the same entity (default: on). See
-                                  docs/id_matching.md.
+                                  diffed as the same entity (default: on).
+                                  Writes how each kind was matched next to
+                                  --output with a .matching.json suffix, or to
+                                  gtfs-diff.matching.json when printing to
+                                  stdout. See docs/id_matching.md.
   --trip-max-shift MINUTES        With --id-matching, also pair trips whose
                                   times moved by at most this many minutes at
                                   every stop, tried in 5-minute steps. 0 pairs
@@ -136,6 +139,14 @@ Options:
   --highlight-shape-moved-m METRES
                                   Notable highlights: report shapes that moved
                                   at least this far.  [default: 50.0; x>=0.0]
+  --highlight-fare-changed-pct PERCENT
+                                  Notable highlights: report fares whose price
+                                  changed by this much.  [default: 50.0;
+                                  x>=0.0]
+  --shape-tolerance-m METRES      With --id-matching, shapes whose old and new
+                                  lines stay this close everywhere count as
+                                  unchanged, so export rounding is not an
+                                  edit.  [default: 1.0; x>=0.0]
   --shape-geometry                Draw every changed, added and deleted shape
                                   on maps in the HTML report's Shapes tab.
                                   Needs --id-matching and the HTML report.
@@ -211,6 +222,9 @@ gtfs-diff --trip-min-shared-stops 0.8 base.zip new.zip
 gtfs-diff -o diff.json --as-of 2026-06-25 --highlight-stop-moved-m 100 \
           --highlight-shape-moved-m 100 base.zip new.zip
 
+# Count shapes that moved less than 2 m as unchanged (default 1 m; 0 = off)
+gtfs-diff --shape-tolerance-m 2 base.zip new.zip
+
 # Also list regenerated IDs of matched entities as changes (off by default)
 gtfs-diff --include-key-changes base.zip new.zip
 
@@ -261,18 +275,20 @@ def diff_feeds(
 | `files` | `Iterable[str] \| None` | Optional file list. Local feeds compare all discoverable files when omitted or only these files when supplied; HTTP(S) folder URLs probe all known supported GTFS files when omitted or these exact files when supplied. Non-listable folders are supported when individual files are public; missing files that return 403/404 are skipped |
 | `large_file_threshold_bytes` | `int \| None` | Files whose larger side is at least this many uncompressed bytes are routed to the built-in DuckDB backend (default `52428800`, 50 MB). Pass `None` to disable DuckDB entirely and always use the in-memory engine; pass a smaller number to route more eligible files |
 | `column_stats` | `bool` | When `True` (default), include per-column modification counts and percentages in each modified file's `stats.column_stats`. Pass `False` to omit that per-column breakdown; `stats.rows_changed_percentage` is still computed |
-| `id_matching` | `bool` | When `True` (default), match entities by content before comparing rows. How each entity was matched is on `run_diff(...).matching`, not in the JSON. See [docs/id_matching.md](docs/id_matching.md) |
+| `id_matching` | `bool` | When `True` (default), match entities by content before comparing rows. How each entity was matched is on `run_diff(...).matching` (the CLI's `.matching.json`), not in the diff JSON. See [docs/id_matching.md](docs/id_matching.md) |
 | `trip_max_shift_minutes` | `float` | With `id_matching`, also pair trips whose times moved by at most this many minutes at every stop (default `15`); `0` pairs only trips with identical times |
 | `include_key_changes` | `bool` | With `id_matching`, also report a new ID of a matched entity as a change of the key columns, in every file (default `False`: regenerated IDs alone are not changes) |
 
 `run_diff()` takes the same arguments, plus `shape_geometry`,
-`trip_min_shared_stops`, `as_of`, `highlight_stop_moved_m` and
-`highlight_shape_moved_m` (see the CLI options). It returns a `DiffRun`:
+`shape_tolerance_m`, `trip_min_shared_stops`, `as_of`,
+`highlight_stop_moved_m`, `highlight_shape_moved_m` and
+`highlight_fare_changed_pct` (see the CLI options). It returns a `DiffRun`:
 
 | Field | Holds |
 |---|---|
 | `diff` | The diff, as written to the JSON (with its `highlights`) |
-| `matching` | How each entity was matched |
+| `matching` | How each kind of entity was matched (the CLI's `.matching.json`) |
+| `id_matches` | How changed IDs were matched: those in the diff's modified rows, and the first 100 of each step |
 | `shape_changes` | With `shape_geometry`, the shapes the report draws |
 | `parameters`, `files_unchanged`, `new_identifiers`, `duration_seconds` | What the report shows beyond the JSON |
 

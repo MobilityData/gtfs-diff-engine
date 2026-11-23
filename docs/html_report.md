@@ -22,8 +22,9 @@ maps comes from the internet (Esri, no key needed).
 | Tab | Shows |
 |---|---|
 | Overview | Notable highlights ([highlights.md](highlights.md)), rows changed per file, the shapes that moved most |
-| Files | Each file's added, deleted and modified rows, old → new. Click a column to filter; find searches the rows on the page |
+| Files | Each file's added, deleted and modified rows, old → new. A **?** next to a changed ID says how it was matched. Click a column to filter; find searches the rows on the page |
 | Shapes | Every changed shape, old against new (needs `--shape-geometry`). Rings mark the moves that are notable highlights |
+| ID matching | How each kind was matched, step by step ([id_matching.md](id_matching.md#matching-summary)), and the IDs that changed, old → new, with the step that paired each. Up to 100 IDs per step |
 
 The header gives the releases, their dates for Mobility Database datasets, and
 row totals. **Settings used** explains every option. The URL keeps the open
@@ -31,9 +32,10 @@ tab, file and map, so a link reopens the same view.
 
 ## Maps
 
-Moved shapes and moved stops open on a map; a removed stop opens its row in
-`stops.txt`. ← and → step
-through the list; Esc closes it.
+Moved shapes and moved stops open on a map; a removed or added stop opens its
+row in `stops.txt`. A stop order change opens the old and new order side by
+side, with the stops that changed place in orange. ← and → step through the
+list; Esc closes it.
 
 | Drawn as | Means |
 |---|---|
@@ -60,6 +62,7 @@ the JSON holds.
 |---|---|---|
 | Rows per file, per kind | 100 | `--html-cap` |
 | Rows per changed column | 100 | `--html-cap` |
+| Changed IDs per matching step | 100 | `--html-cap`, lower only |
 | Shapes drawn | 100, worst first | `render_html(shape_cap=)` |
 | Points per shape | 300, keeping the ones that moved most | `HTML_SHAPE_POINTS` |
 

@@ -22,6 +22,7 @@ from ..feeds.csv_utils import _is_url
 from ..highlights import find_highlights
 from ..tracing import _trace
 from .core import (
+    DEFAULT_SHAPE_TOLERANCE_M,
     DEFAULT_TRIP_MAX_SHIFT_MIN,
     DEFAULT_TRIP_MIN_SHARED_STOPS,
     ID_COLUMNS,
@@ -36,6 +37,7 @@ from .shapes import ShapesMixin
 from .trips import TripsMixin, shift_steps
 
 __all__ = [
+    "DEFAULT_SHAPE_TOLERANCE_M",
     "DEFAULT_TRIP_MAX_SHIFT_MIN",
     "DEFAULT_TRIP_MIN_SHARED_STOPS",
     "ID_COLUMNS",
@@ -70,9 +72,7 @@ class _Matcher(EntitiesMixin, TripsMixin, ShapesMixin, MatcherBase):
             self.result.summary["trip"]["renumbered_stops"] = self.renumbered
         if self.has("routes.txt"):
             self.timed("route", lambda: self.match_routes(trips))
-        if self.has("trips.txt") and (
-            self.has("calendar.txt") or self.has("calendar_dates.txt")
-        ):
+        if self.has("trips.txt") and self.has_calendar():
             self.timed("service", lambda: self.match_services(trips))
         if self.has("shapes.txt"):
             self.timed("shape", lambda: self.match_shapes(trips, shape_geometry))
@@ -87,13 +87,15 @@ def match_feeds(
     trip_max_shift_min: float = DEFAULT_TRIP_MAX_SHIFT_MIN,
     highlights: dict | None = None,
     trip_min_shared_stops: float = DEFAULT_TRIP_MIN_SHARED_STOPS,
+    shape_tolerance_m: float = DEFAULT_SHAPE_TOLERANCE_M,
 ) -> MatchResult:
     """Match the entities of two feeds given ``{file name: path or URL}`` per side.
 
     Kinds whose files are missing on either side are left out, so the diff keys
     them by ID. Trips whose times moved by up to *trip_max_shift_min* minutes
     are paired too (0 turns that off), and so are trips sharing at least
-    *trip_min_shared_stops* of their stops (1 turns that off). With
+    *trip_min_shared_stops* of their stops (1 turns that off). Shapes whose
+    lines stay within *shape_tolerance_m* of each other are unchanged. With
     *shape_geometry*, the result also lists every changed shape with its points.
     With *highlights* (the keyword arguments of
     :func:`gtfs_diff.highlights.find_highlights`), it also has the notable
@@ -120,6 +122,7 @@ def match_feeds(
         # Shapes moved this far are 'changed', matching the shape_moved highlight.
         if highlights is not None:
             matcher.shape_moved_m = highlights["shape_moved_m"]
+        matcher.shape_tolerance_m = shape_tolerance_m
         matcher.run(shape_geometry)
         if highlights is not None:
             start = time.monotonic()

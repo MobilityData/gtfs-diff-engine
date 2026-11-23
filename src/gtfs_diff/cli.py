@@ -1,5 +1,6 @@
 """Click-based CLI entry point for gtfs-diff."""
 
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -9,8 +10,13 @@ import click
 from gtfs_diff.diff.run import diff_json, run_diff
 from gtfs_diff.feeds.csv_utils import _is_url
 from gtfs_diff.gtfs_definitions import DEFAULT_ID_CHURN_THRESHOLD
-from gtfs_diff.highlights import DEFAULT_SHAPE_MOVED_M, DEFAULT_STOP_MOVED_M
+from gtfs_diff.highlights import (
+    DEFAULT_FARE_CHANGED_PCT,
+    DEFAULT_SHAPE_MOVED_M,
+    DEFAULT_STOP_MOVED_M,
+)
 from gtfs_diff.matching import (
+    DEFAULT_SHAPE_TOLERANCE_M,
     DEFAULT_TRIP_MAX_SHIFT_MIN,
     DEFAULT_TRIP_MIN_SHARED_STOPS,
 )
@@ -125,7 +131,9 @@ def _check_cap(value: int | None) -> int | None:
     help=(
         "Match agencies, stops, routes, services, trips and shapes by content "
         "before comparing rows, so renamed or regenerated IDs are diffed as the "
-        "same entity (default: on). See docs/id_matching.md."
+        "same entity (default: on). Writes how each kind was matched next to "
+        "--output with a .matching.json suffix, or to gtfs-diff.matching.json "
+        "when printing to stdout. See docs/id_matching.md."
     ),
 )
 @click.option(
@@ -190,6 +198,25 @@ def _check_cap(value: int | None) -> int | None:
     help="Notable highlights: report shapes that moved at least this far.",
 )
 @click.option(
+    "--highlight-fare-changed-pct",
+    type=click.FloatRange(0.0),
+    default=DEFAULT_FARE_CHANGED_PCT,
+    show_default=True,
+    metavar="PERCENT",
+    help="Notable highlights: report fares whose price changed by this much.",
+)
+@click.option(
+    "--shape-tolerance-m",
+    type=click.FloatRange(0.0),
+    default=DEFAULT_SHAPE_TOLERANCE_M,
+    show_default=True,
+    metavar="METRES",
+    help=(
+        "With --id-matching, shapes whose old and new lines stay this close "
+        "everywhere count as unchanged, so export rounding is not an edit."
+    ),
+)
+@click.option(
     "--shape-geometry",
     is_flag=True,
     default=False,
@@ -243,6 +270,8 @@ def main(
     as_of: datetime | None,
     highlight_stop_moved_m: float,
     highlight_shape_moved_m: float,
+    highlight_fare_changed_pct: float,
+    shape_tolerance_m: float,
     shape_geometry: bool,
     html_path: Path | None,
     no_html: bool,
@@ -315,6 +344,8 @@ def main(
             as_of=as_of.date() if as_of else None,
             highlight_stop_moved_m=highlight_stop_moved_m,
             highlight_shape_moved_m=highlight_shape_moved_m,
+            highlight_fare_changed_pct=highlight_fare_changed_pct,
+            shape_tolerance_m=shape_tolerance_m,
         )
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
@@ -347,6 +378,11 @@ def main(
                 encoding="utf-8",
             )
             click.echo(f"HTML report written to {path}", err=True)
+        if run.matching is not None:
+            path = stem.with_name(stem.name + ".matching.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(run.matching, indent=2), encoding="utf-8")
+            click.echo(f"ID matching summary written to {path}", err=True)
     except OSError as exc:
         click.echo(f"Error writing output: {exc}", err=True)
         sys.exit(1)

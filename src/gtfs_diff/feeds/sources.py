@@ -167,12 +167,13 @@ def _open_feed(
     elif zipfile.is_zipfile(path):
         zf = zipfile.ZipFile(path, "r")
         try:
-            # Accept both root-level files and files inside exactly one subdirectory.
+            # Accept both root-level files and files inside exactly one subdirectory,
+            # skipping the metadata macOS adds (__MACOSX/, ._ files).
             name_map: dict[str, str] = {}
             for member in zf.namelist():
-                if member.endswith(".txt"):
+                if member.endswith(".txt") and not member.startswith("__MACOSX/"):
                     basename = member.rsplit("/", 1)[-1]
-                    if basename:
+                    if basename and not basename.startswith("._"):
                         name_map[basename] = member
 
             openers = {}

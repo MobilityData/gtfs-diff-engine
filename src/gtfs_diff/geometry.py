@@ -10,6 +10,18 @@ GRID_M = 100.0
 MAX_GAP_M = 5_000.0
 
 
+def coord_sql(column: str, limit: float) -> str:
+    """SQL for a latitude (*limit* 90) or longitude (180) column: NULL unless a
+    number within the limit, so NaN or 1e30 cannot break the grid maths."""
+    value = f"try_cast({column} AS DOUBLE)"
+    return f"CASE WHEN abs({value}) <= {limit} THEN {value} END"
+
+
+def sql_path(path: str) -> str:
+    """*path* as an SQL string literal."""
+    return "'" + str(path).replace("'", "''") + "'"
+
+
 def line_gaps(coords, other) -> list[float]:
     """Metres from each point of *coords* to the nearest segment of *other*.
 

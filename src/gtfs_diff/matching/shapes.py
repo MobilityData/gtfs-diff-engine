@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from ..geometry import line_gaps
+from ..geometry import coord_sql, line_gaps
 from ..highlights import DEFAULT_SHAPE_MOVED_M
 from .core import (
+    DEFAULT_SHAPE_TOLERANCE_M,
     METERS_PER_DEGREE,
     SHAPE_CELL_M,
     SHAPE_NEAR_M,
@@ -21,6 +22,8 @@ class ShapesMixin:
 
     # A matched shape this far apart somewhere counts as moved ('changed').
     shape_moved_m: float = DEFAULT_SHAPE_MOVED_M
+    # Closer than this everywhere counts as the same line ('same', 'renamed').
+    shape_tolerance_m: float = DEFAULT_SHAPE_TOLERANCE_M
 
     def match_shapes(self, trips: bool, geometry: bool) -> None:
         """
@@ -59,8 +62,8 @@ class ShapesMixin:
                 SELECT shape_id, seq, lat, lon, coalesce({seg}, 0) AS seg
                 FROM (
                     SELECT shape_id, try_cast(shape_pt_sequence AS DOUBLE) AS seq,
-                           try_cast(shape_pt_lat AS DOUBLE) AS lat,
-                           try_cast(shape_pt_lon AS DOUBLE) AS lon
+                           {coord_sql("shape_pt_lat", 90)} AS lat,
+                           {coord_sql("shape_pt_lon", 180)} AS lon
                     FROM {side}_shapes WHERE shape_id IS NOT NULL
                 )
                 WHERE lat IS NOT NULL AND lon IS NOT NULL AND seq IS NOT NULL
@@ -237,17 +240,21 @@ class ShapesMixin:
 
     def classify_shapes(self, geometry: bool) -> None:
         """Count shapes by kind of change, and list them when *geometry*.
-        'changed' uses the shape_moved highlight's test."""
+        'changed' uses the shape_moved highlight's test; lines within
+        shape_tolerance_m of each other are the same line."""
         self.shape_gaps()
+        gap = "coalesce(g.gap_m, p.dev_m)"
+        same_line = (
+            f"(o.fingerprint = n.fingerprint OR ({gap} < {float(self.shape_moved_m)}"
+            f" AND {gap} < {float(self.shape_tolerance_m)}))"
+        )
         self.con.execute(
             f"""
             CREATE TABLE shape_change AS
             SELECT CASE
-                       WHEN o.fingerprint = n.fingerprint AND p.old_id = p.new_id
-                           THEN 'same'
-                       WHEN o.fingerprint = n.fingerprint THEN 'renamed'
-                       WHEN coalesce(g.gap_m, p.dev_m) < {float(self.shape_moved_m)}
-                           THEN 'redrawn'
+                       WHEN {same_line} AND p.old_id = p.new_id THEN 'same'
+                       WHEN {same_line} THEN 'renamed'
+                       WHEN {gap} < {float(self.shape_moved_m)} THEN 'redrawn'
                        ELSE 'changed'
                    END AS change,
                    p.old_id, p.new_id, coalesce(g.gap_m, p.dev_m) AS dev_m,

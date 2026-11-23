@@ -81,6 +81,8 @@ h1 .of { color: var(--faint); font-weight: 600; }
 .tabs.stuck .ds { display: none; }
 .tabs.stuck .tab { padding-top: 9px; padding-bottom: 8px; }
 .tabs.stuck .tab > .ico { grid-row: auto; width: 18px; height: 18px; }
+.tab .short { display: none; }
+.tab .lb { white-space: nowrap; }
 
 /* Keep exploring */
 .next { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); }
@@ -100,6 +102,7 @@ main.enter { animation: enter .22s ease-out; }
 
 /* Sections */
 .sec + .sec { margin-top: 52px; }
+.sec { scroll-margin-top: 80px; }
 .sec-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; margin-bottom: 12px; }
 h2 { font-size: 18px; line-height: 1.25; font-weight: 680; letter-spacing: -.02em; margin: 0; }
 .sec-sub { color: var(--muted); margin: 2px 0 0; max-width: 70ch; }
@@ -117,6 +120,14 @@ h3 { font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform:
   width: calc(100% + 24px); margin: 0 -12px; padding: 6px 12px; border: 0; border-radius: 7px; background: none;
   text-align: left; cursor: pointer; }
 .row-btn:hover { background: var(--hover); }
+.row-btn .nm:has(.feat) { white-space: normal; }
+.feat small { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 1px; }
+.row-wrap { display: flex; align-items: center; gap: 4px; }
+.row-wrap .row-btn { width: auto; flex: 1; min-width: 0; }
+.doc-link { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px;
+  color: var(--muted); font-size: 12.5px; text-decoration: none; }
+.doc-link:hover, .doc-link:focus-visible { color: var(--ink); background: var(--hover); text-decoration: underline; }
+.doc-link .ico { width: 12px; height: 12px; }
 .row-btn .id { font-family: var(--mono); font-size: 12.5px; font-weight: 560; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-btn .nm { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-btn .fig { font-variant-numeric: tabular-nums; font-weight: 620; white-space: nowrap; }
@@ -223,6 +234,40 @@ ins { background: var(--add-soft); color: var(--add); text-decoration: none; pad
 .fine > div + div { margin-top: 4px; }
 .empty { color: var(--muted); padding: 32px 0; }
 
+/* ID matching */
+.why { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 7px;
+  padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--bg); color: var(--muted); font: 650 10px/1 var(--sans);
+  cursor: pointer; vertical-align: 1px; transition: color .15s, border-color .15s, background .15s; }
+.why::after { content: ""; position: absolute; inset: -8px; }
+.why:hover, .why:focus-visible { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+#whybox { position: fixed; inset: auto; margin: 0; width: min(340px, calc(100vw - 16px)); padding: 14px 16px; border: 0; border-radius: 12px;
+  background: var(--raised); color: var(--ink); box-shadow: var(--shadow); font-size: 13px; line-height: 1.5; }
+#whybox p { margin: 8px 0 0; color: var(--ink-2); }
+#whybox .why-step { color: var(--muted); font-size: 12.5px; }
+#whybox .link { margin-top: 10px; font-size: 12.5px; }
+.why-k { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.why-pair { margin-top: 6px; font: 12px var(--mono); overflow-wrap: anywhere; }
+.im { display: grid; grid-template-columns: minmax(140px, 230px) repeat(4, 96px) minmax(0, 1fr); gap: 6px 22px; align-items: baseline;
+  padding: 13px 0; border-top: 1px solid var(--line); }
+.im-head { border-top: 0; padding: 0 0 6px; font-size: 11.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.im .nm { font-size: 14px; font-weight: 640; letter-spacing: -.01em; }
+.im .nm small { font: 400 12px var(--mono); color: var(--muted); margin-left: 8px; }
+.im .n { text-align: right; font-variant-numeric: tabular-nums; }
+.im .n.z { color: var(--faint); }
+.im .lbl { display: none; }
+.im-steps { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 20px; color: var(--muted); font-size: 12.5px; }
+.im-steps .step { display: inline-flex; align-items: center; gap: 6px; }
+.im-steps b { color: var(--ink-2); font-weight: 620; font-variant-numeric: tabular-nums; }
+.im-steps .why { margin-left: 0; }
+.im-fine { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; max-width: 120ch; }
+.steplink { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
+  text-decoration: underline dotted var(--faint); text-underline-offset: 3px; }
+.steplink:hover { color: var(--accent); text-decoration-color: var(--accent); }
+table.ids { width: auto; min-width: min(100%, 760px); }
+table.ids th, table.ids td { padding-right: 40px; }
+table.ids td.how, table.ids td.fig { font-family: var(--sans); font-size: 12.5px; }
+table.ids td.fig { color: var(--muted); }
+
 /* Shapes */
 .legend { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 12.5px; color: var(--ink-2); }
 .legend > span { display: inline-flex; align-items: center; gap: 9px; }
@@ -312,6 +357,25 @@ dialog[open] { animation: pop .18s ease-out; }
 .facts dd { margin: 0; font-weight: 560; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .big { font-size: 27px; font-weight: 700; letter-spacing: -.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .big-sub { color: var(--muted); margin: 2px 0 18px; }
+.orderview { overflow: auto; padding: 26px 32px 36px; }
+.ov-grid { display: grid; max-width: 880px; margin: 0 auto; }
+.ov-grid h3 { margin: 0 0 10px; }
+.ov-row { height: 36px; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ov-row .n { width: 2.2em; flex: none; text-align: right; font: 12px var(--mono); color: var(--faint); }
+.ov-row .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-row .id { flex: none; font: 11.5px var(--mono); color: var(--faint); }
+.ov-row.moved .nm { color: var(--hl); font-weight: 620; }
+.ov-gap { height: 30px; display: flex; align-items: center; padding-left: calc(2.2em + 10px); color: var(--faint); font-size: 12.5px; }
+.ov-links { display: block; }
+.ov-links line { stroke: var(--line-2); stroke-width: 1.5; }
+.ov-links circle { fill: var(--line-2); }
+.ov-links .moved { stroke: var(--hl); stroke-width: 2.4; }
+.ov-links circle.moved { fill: var(--hl); stroke: none; }
+.ov-note { max-width: 880px; margin: 22px auto 0; color: var(--muted); font-size: 12.5px; }
+.ov-move { padding: 6px 0; border-top: 1px solid var(--line); }
+.ov-move:first-child { border-top: 0; padding-top: 0; }
+.ov-move .nm { font-weight: 600; color: var(--hl); }
+.side .ov-p { margin: 0; font-size: 13px; }
 .toggles { display: grid; gap: 2px; margin: 0 -10px; }
 .toggle { display: flex; align-items: center; gap: 12px; width: 100%; padding: 5px 10px; border: 0; border-radius: 7px; background: none;
   cursor: pointer; text-align: left; font-size: 13px; color: var(--ink-2); }
@@ -342,6 +406,8 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 28px; justify-content: s
 
 @media (max-width: 900px) {
   .wrap { padding: 0 20px; }
+  .tab .long { display: none; }
+  .tab .short { display: inline; }
   .hk { grid-template-columns: 1fr; gap: 10px; }
   .hk-note { margin-left: 28px; }
   .files { grid-template-columns: 1fr; gap: 28px; }
@@ -352,9 +418,22 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 28px; justify-content: s
   .cf .go { display: none; }
   .zoomwrap { grid-template-columns: 1fr; grid-template-rows: 58vh auto; overflow-y: auto; }
   .side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .orderview { padding: 18px 16px 24px; }
+  .ov-row { gap: 6px; }
+  .ov-row .n { width: 1.4em; }
+  .ov-row .id { display: none; }
+  .ov-gap { padding-left: calc(1.4em + 6px); }
   .sheet { width: 100vw; height: 100vh; border-radius: 0; }
   .mapctl.tc { top: auto; bottom: 44px; }
   .mapinfo { max-width: calc(100% - 32px); bottom: 88px; }
+}
+@media (max-width: 700px) {
+  .im { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; }
+  .im .nm { grid-column: 1 / -1; }
+  .im-head { display: none; }
+  .im .n { text-align: left; }
+  .im .lbl { display: inline; color: var(--muted); margin-left: 5px; }
+  .im-steps { margin-top: 4px; }
 }
 @media (max-width: 560px) {
   body { font-size: 14.5px; }
@@ -363,9 +442,9 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 28px; justify-content: s
   .lede { font-size: 16px; }
   .tabs .wrap { gap: 0; }
   .tab { flex: 1 1 0; padding: 10px 8px 9px; column-gap: 7px; }
-  .tab .ds { display: none; }
-  .tab > .ico { grid-row: auto; width: 17px; height: 17px; }
+  .tab .ds, .tab > .ico { display: none; }
   .tab .lb { font-size: 14px; gap: 6px; }
+  .tab .c { padding: 1px 6px; }
   .rel-arrow { display: none; }
   .dlg-head { padding-left: 16px; }
   .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 16px; }
@@ -395,6 +474,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 28px; justify-content: s
   <div class="dlg-head"><div class="dlg-title"><span class="t" id="settings-title" style="font-family:var(--sans)">Settings used</span></div><div class="dlg-nav" id="settings-nav"></div></div>
   <div class="body" id="settings-body"></div>
 </dialog>
+<div id="whybox" popover role="dialog" aria-label="How this was matched"></div>
 <script id="data" type="application/json">/*DATA*/null</script>
 <script>
 "use strict";
@@ -434,6 +514,7 @@ const sv = (tag, attrs) => {
 };
 const ICONS = {
   arrow: "M5 12h14M13 6l6 6-6 6",
+  external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   left: "M15 6l-6 6 6 6", right: "M9 6l6 6-6 6", close: "M6 6l12 12M18 6L6 18",
   plus: "M12 5v14M5 12h14", minus: "M5 12h14",
   fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
@@ -444,10 +525,13 @@ const ICONS = {
   calendarOff: "M4 6.5h16V20H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4M9 15.5h6",
   pinX: "M12 21s-6.5-5.6-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21zM10 7.8l4 4M14 7.8l-4 4",
   pinMove: "M9 21s-5.5-4.8-5.5-9.5a5.5 5.5 0 0 1 11 0C14.5 16.2 9 21 9 21zM9 11.5h.01M15.5 5.5h5M18.5 3l2.5 2.5-2.5 2.5",
+  pinPlus: "M12 21s-6.5-5.6-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21zM12 7v5.6M9.2 9.8h5.6",
+  reorder: "M7 20V4M4 7l3-3 3 3M17 4v16M14 17l3 3 3-3",
   grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   file: "M14 3H6v18h12V7zM14 3v4h4M9 12.5h6M9 16.5h6",
   route: "M6 19.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM8.2 15.6C12 13 9 9.6 15.6 8.2",
   sliders: "M4 7h10M18 7h2M4 17h4M12 17h8M16 4.5v5M10 14.5v5",
+  swap: "M4 8h14M15 5l3 3-3 3M20 16H6M9 13l-3 3 3 3",
   eye: "M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
   eyeOff: "M3 3l18 18M10.6 5.6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.7 3.4M6.6 6.6C3.9 8.3 2.5 12 2.5 12s3.5 6.5 9.5 6.5a9 9 0 0 0 4.4-1.1",
 };
@@ -466,7 +550,8 @@ const sum = a => a.reduce((x, y) => x + (y || 0), 0);
 const go = () => el("span", { class: "go" }, icon("arrow"));
 
 const state = { tab: "overview", file: null, part: null, col: null, shape: "all", page: 0, view: null, all: false,
-  q: "", shapeQ: "", fileQ: "", focus: null, map: null, whole: false, tiles: true, hidden: {} };
+  q: "", shapeQ: "", fileQ: "", focus: null, map: null, whole: false, tiles: true, hidden: {},
+  idKind: null, idStep: null, idQ: "", idPage: 0 };
 const PAGE_SIZE = 10;
 try { state.tiles = localStorage.getItem("gtfs-diff-tiles") !== "off"; } catch (e) { /* storage blocked */ }
 
@@ -551,8 +636,13 @@ const HIGHLIGHT_KINDS = {
   service_periods_do_not_overlap: ["Service periods do not overlap", "calendarX"],
   service_day_without_trips: ["Days that lost all their trips", "calendarOff"],
   stop_removed: ["Stops removed", "pinX"],
+  stop_added: ["Stops added", "pinPlus"],
+  stop_order_changed: ["Stop order changed", "reorder"],
   stop_moved: ["Stops moved", "pinMove"],
   shape_moved: ["Shapes moved", "route"],
+  fare_changed: ["Fares changed", "check"],
+  feature_added: ["Features added", "pinPlus"],
+  feature_removed: ["Features removed", "pinX"],
 };
 
 function refId(h, file, feed) {
@@ -581,6 +671,11 @@ function openHighlight(h, siblings) {
   if (h.code === "shape_moved" && shapeOf(h)) {
     const list = (siblings || [h]).map(shapeOf).filter(Boolean).map(item => ({ item }));
     openMap(list, list.findIndex(e => e.item === shapeOf(h)));
+    return;
+  }
+  if (h.code === "stop_order_changed" && (h.details || {}).base_order) {
+    const list = (siblings || [h]).filter(x => (x.details || {}).base_order).map(x => ({ order: x }));
+    openMap(list, list.findIndex(e => e.order === h));
     return;
   }
   if (stopPlace(h)) {
@@ -621,7 +716,26 @@ function highlightRowText(h) {
     return [when, `had ${trips} trips${d.days > 1 ? " a day" : ""}`, plural(d.days, "day")];
   }
   if (h.code === "stop_removed") return [ids("stops.txt"), d.stop_name || "", d.base_trips ? plural(d.base_trips, "trip") : ""];
+  if (h.code === "stop_added") {
+    const r = d.routes || [];
+    return [ids("stops.txt"), d.stop_name || "", !r.length ? "no trips" : r.length > 2 ? plural(r.length, "route") : `route${r.length > 1 ? "s" : ""} ${r.join(", ")}`];
+  }
+  if (h.code === "stop_order_changed") {
+    const s = d.stops || [], name = id => (d.stop_names || {})[id] || id;
+    const what = s.length === 1 ? `${name(s[0].stop_id)} now ${s[0].new_after ? `after ${name(s[0].new_after)}` : "first"}` : `${s.length} stops changed place`;
+    return [`route ${d.route}`, what, plural(d.trips, "trip")];
+  }
   if (h.code === "stop_moved") return [ids("stops.txt"), d.stop_name || "", metres(d.distance_m)];
+  if (h.code === "feature_added" || h.code === "feature_removed") {
+    const fields = Object.entries(d.fields || {}).map(([f, cols]) => `${f} (${cols.join(", ")})`).join(" · ");
+    return [d.feature, el("span", { class: "feat" }, d.group || "", fields ? el("small", {}, fields) : null), ""];
+  }
+  if (h.code === "fare_changed") {
+    const unit = d.currency ? ` ${d.currency}` : "", r = d.routes || [];
+    const where = r.length ? `route${r.length > 1 ? "s" : ""} ${r.slice(0, 3).join(", ")}` : "";
+    const what = [d.fare_product_name, where].filter(Boolean).join(", ");
+    return [d.fare_id || d.fare_product_id, what, `${d.base_price}${unit} → ${d.new_price}${unit}${d.change_pct == null ? "" : ` (${d.change_pct > 0 ? "+" : ""}${d.change_pct}%)`}`];
+  }
   if (h.code === "shape_moved") return [ids("shapes.txt"), d.route ? `route ${d.route}` : "", metres(d.distance_m)];
   const r = (h.references || [])[0];
   return [r ? Object.values(r.identifier)[0] : "", h.message, ""];
@@ -633,8 +747,13 @@ function highlightKindNote(kind) {
     service_periods_do_not_overlap: "The two releases have no day of service in common.",
     service_day_without_trips: "Days in the new release with no trips at all, which had trips before.",
     stop_removed: `Gone from the new release, with no new stop within ${fmt(D.constants.stop_replacement_m)} m to replace it.`,
+    stop_added: `New in this release, with no removed stop within ${fmt(D.constants.stop_replacement_m)} m that it replaces.`,
+    stop_order_changed: "Trips that call at the same stops in another order. Added or removed stops alone do not count. Open one to see both orders.",
     stop_moved: `Moved at least ${fmt(P.stop_moved_m)} m. Open one to see it on a map.`,
     shape_moved: `Moved at least ${fmt(P.shape_moved_m)} m somewhere along the line. Open one to see it on a map.`,
+    feature_added: "A GTFS feature the old release did not use and the new one does: fares or pathways. Open one to see its file; Documentation opens gtfs.org in a new tab.",
+    feature_removed: "A GTFS feature the old release used and the new one does not: fares or pathways. Open one to see its file; Documentation opens gtfs.org in a new tab.",
+    fare_changed: `Price changed by at least ${fmt(P.fare_changed_pct)}%, became free, or stopped being free.`,
   }[kind] || "";
 }
 
@@ -650,13 +769,34 @@ function highlightList(items, counts) {
         el("div", { class: "hk-note" }, highlightKindNote(kind))),
       el("div", { class: "hk-items" }, shown.map(h => {
         const [id, name, figure] = highlightRowText(h);
-        return el("button", { class: "row-btn" + (dates ? " plain" : ""), title: h.message, onclick: () => openHighlight(h, shown) },
-          el("span", { class: "id" }, id), el("span", { class: "nm" }, name), el("span", { class: "fig" }, figure), go());
+        const cells = [el("span", { class: "id" }, id), el("span", { class: "nm" }, name), el("span", { class: "fig" }, figure), go()];
+        const row = el("button", { class: "row-btn" + (dates ? " plain" : ""), title: h.message, onclick: () => openHighlight(h, shown) }, cells);
+        const url = h.code.startsWith("feature_") && (h.details || {}).url;
+        if (!url) return row;
+        return el("div", { class: "row-wrap" }, row,
+          el("a", { class: "doc-link", href: url, target: "_blank", rel: "noopener noreferrer", title: `Read about ${h.details.feature} on gtfs.org (opens in a new tab)` },
+            "Documentation", icon("external")));
       }), total > shown.length ? el("div", { class: "more" }, `and ${fmt(total - shown.length)} more in the JSON report`) : null));
   });
 }
 
 /* ---------- Overview ---------- */
+const CHECKED = {
+  stops: "no stop removed, added or moved far",
+  stop_order: "no change in stop order",
+  service: "no day that lost its service",
+  shapes: "no shape that moved",
+  fares: "no fare that changed much",
+};
+
+function noHighlights() {
+  const checks = D.highlight_checks ?? ["stops", "stop_order", "service", "shapes"];
+  const said = Object.keys(CHECKED).filter(k => checks.includes(k)).map(k => CHECKED[k]);
+  if (!said.length) return "No notable highlights.";
+  const last = said.pop();
+  return `No notable highlights: ${said.length ? `${said.join(", ")} and ${last}` : last}.`;
+}
+
 function overviewTab() {
   const out = [];
   if (D.highlights != null) {
@@ -664,7 +804,7 @@ function overviewTab() {
       el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "Notable highlights"),
         el("p", { class: "sec-sub" }, highlightTotal ? "Changes that riders would notice. Open one to see it on a map or in its file." : null))));
     if (!D.highlights.length) {
-      sec.append(el("p", { class: "clear" }, icon("check"), "No notable highlights: no stop removed or moved far, no day that lost its service and no shape that moved."));
+      sec.append(el("p", { class: "clear" }, icon("check"), noHighlights()));
     } else put(sec, highlightList(D.highlights, D.highlight_counts));
     out.push(sec);
   }
@@ -784,14 +924,14 @@ function fileDetail(f) {
   }
   if (f.action === "unchanged") {
     p.append(el("p", { class: "fd-meta" }, el("span", {}, `Compared row by row: ${plural(s.total_rows_base, "row")} in each release, and nothing differs.`)));
-    put(p, fileHighlights(f));
+    put(p, fileHighlights(f), renamedNote(f));
     return done();
   }
   const what = { modified: ["Modified", "t-mod"], added: ["New file", "t-add"], deleted: ["File removed", "t-del"], not_compared: ["Not compared", "t-hl"] }[f.action] || [f.action, ""];
   p.append(el("p", { class: "fd-meta" }, el("span", { class: "tag " + what[1] }, what[0]),
     s.total_rows_base != null || s.total_rows_new != null ? el("span", { class: "num" }, `${fmt(s.total_rows_base)} → ${fmt(s.total_rows_new)} rows`) : null,
     s.rows_changed_percentage != null ? el("span", { class: "num" }, `${s.rows_changed_percentage}% of rows changed`) : null));
-  put(p, fileHighlights(f));
+  put(p, fileHighlights(f), renamedNote(f));
   if (f.reason) p.append(el("div", { class: "note" }, f.reason));
   if (f.columns_added.length) p.append(el("div", { class: "note" }, "Columns added: ", el("span", { class: "mono t-add" }, f.columns_added.join(", "))));
   if (f.columns_deleted.length) p.append(el("div", { class: "note" }, "Columns deleted: ", el("span", { class: "mono t-del" }, f.columns_deleted.join(", "))));
@@ -895,12 +1035,223 @@ function modifiedTable(f, rows, isFocus) {
     el("td", { class: "ln" }, r.lines[0] === r.lines[1] ? r.lines[0] : r.lines.join(" → ")), cols.map(c => {
       const ch = r.changes[c];
       const newId = r.new_id && r.new_id[c] !== r.id[c] ? r.new_id[c] : null;
-      if (ch) return el("td", {}, el("del", {}, ch[0] || "∅"), el("span", { class: "arrow" }, "→"), el("ins", {}, ch[1] || "∅"));
-      if (newId != null) return el("td", {}, el("del", {}, r.id[c]), el("span", { class: "arrow" }, "→"), el("ins", {}, newId));
+      const q = newId != null ? idWhy(f, c, r.id[c], newId) : null;
+      if (ch) return el("td", {}, el("del", {}, ch[0] || "∅"), el("span", { class: "arrow" }, "→"), el("ins", {}, ch[1] || "∅"), q);
+      if (newId != null) return el("td", {}, el("del", {}, r.id[c]), el("span", { class: "arrow" }, "→"), el("ins", {}, newId), q);
       const i = f.columns.indexOf(c);
       return el("td", { class: pk.includes(c) ? null : "same" }, i >= 0 ? (r.values[i] ?? "") : "");
     })));
   return el("div", { class: "tablewrap" }, el("table", {}, el("thead", {}, head), el("tbody", {}, body)));
+}
+
+/* ---------- ID matching ---------- */
+const KINDS = { trip: ["trip", "trips"], stop: ["stop", "stops"], route: ["route", "routes"], service: ["service", "services"],
+  shape: ["shape", "shapes"], agency: ["agency", "agencies"] };
+const KIND_ORDER = ["trip", "stop", "route", "service", "shape", "agency"];
+const FILE_KIND = { "agency.txt": "agency", "stops.txt": "stop", "routes.txt": "route", "trips.txt": "trip",
+  "calendar.txt": "service", "calendar_dates.txt": "service", "shapes.txt": "shape" };
+const MATCHED = (D.matching || {}).entities || {};
+const pct = v => `${Math.round(v * 100)}%`;
+const mins = s => s < 60 ? `${fmt(s)} s` : s % 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${fmt(s / 60)} min`;
+const upper1 = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+// What a matching step compares; m holds one pair's figures when known.
+function stepNote(kind, how, m) {
+  m = m || {};
+  const one = KINDS[kind][0], C = D.constants;
+  const shift = /^time shift (\S+) min$/.exec(how);
+  if (shift) return `Same stops, with times moved by ${m.shift_s != null ? mins(m.shift_s) : `up to ${shift[1]} min`} at most. `
+    + "Same route name, weekdays and direction, and no other trip of the route departs close enough to be confused with it.";
+  switch (how) {
+    case "same id": return "Same ID in both releases.";
+    case "same name": return "Same agency_name, and no other agency has it in either release.";
+    case "same place": return m.meters != null
+      ? `The nearest stop within ${fmt(C.stop_radius_m)} m of the old one: ${m.meters ? `${metres(m.meters)} away` : "at the same coordinates"}, ${m.same_name ? "with the same name" : "under another name"}.`
+      : `The nearest stop within ${fmt(C.stop_radius_m)} m of the old one, a stop with the same name first.`;
+    case "exact days": return "Same stops and times, route name, direction and service dates.";
+    case "weekly pattern": return "Same stops and times, route name, direction and weekdays.";
+    case "no route name": return "Same stops and times, direction and weekdays, under another route name. No other trip matches it this way.";
+    case "no service days": return "Same stops and times, route name and direction, on other days. No other trip matches it this way.";
+    case "most stops shared": {
+      const least = ((MATCHED.trip || {}).shared_stops || {}).min_shared_stops, most = (D.matching || {}).trip_max_shift_minutes;
+      return `${m.shared != null ? pct(m.shared) : least != null ? `At least ${pct(least)}` : "Most"} of its stops in common, in the same order, with times `
+        + `within ${m.shift_s != null ? mins(m.shift_s) : `${fmt(most)} min`}. Same route name, days and direction, and no other trip of the route departs close to it.`;
+    }
+    case "trip votes": return m.trips != null
+      ? `${plural(m.trips, "matched trip")} ${m.trips === 1 ? "links" : "link"} the two, more than link either to another ${one}.`
+      : `Its matched trips link it to the old ${one} more than to any other, and the other way round.`;
+    case "only route of name": return "The only route with this agency, route_type and name in each release.";
+    case "only shape of route": return "The only shape left for its route and direction in each release.";
+    case "identical points": return "Same points, in the same order.";
+    case "near points": return `The two lines stay within ${fmt(C.shape_near_m)} m of each other, closer than any other shape.`;
+  }
+  return how;
+}
+
+const whyBox = document.getElementById("whybox");
+let whyAt = null;
+function placeWhy() {
+  const r = whyAt.getBoundingClientRect(), w = whyBox.offsetWidth || Math.min(340, innerWidth - 16), h = whyBox.offsetHeight;
+  const above = h && r.bottom + 8 + h > innerHeight - 8 && r.top - 8 - h >= 8;
+  whyBox.style.left = `${Math.max(8, Math.min(r.left - 16, innerWidth - w - 8))}px`;
+  whyBox.style.top = `${above ? r.top - 8 - h : r.bottom + 8}px`;
+}
+whyBox.addEventListener("toggle", e => { if (e.newState === "open" && whyAt) placeWhy(); });
+addEventListener("scroll", () => { if (whyBox.matches(":popover-open")) whyBox.hidePopover(); }, { passive: true, capture: true });
+
+// A "?" button opening the note content() makes.
+function why(content, label) {
+  return el("button", { class: "why", type: "button", popovertarget: "whybox", "aria-label": label,
+    onclick: e => { whyAt = e.currentTarget; swap(whyBox, content()); placeWhy(); } }, "?");
+}
+
+// Opens the ID matching tab on the changed IDs of *kind*, optionally one step.
+function goMatching(kind, step) {
+  if (KINDS[kind]) Object.assign(state, { idKind: kind, idStep: step || null, idQ: "", idPage: 0 });
+  setTab("matching");
+  if (step) document.getElementById("changed-ids").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+const matchLink = (kind, label) => D.matching ? el("button", { class: "link", onclick: () => { whyBox.hidePopover(); goMatching(kind); } },
+  label, icon("arrow")) : null;
+const pair = (a, b) => el("div", { class: "why-pair" }, el("del", {}, a), el("span", { class: "arrow" }, "→"), el("ins", {}, b));
+const listed = kind => (D.id_matches || {})[kind] || {};
+
+// Note on one changed ID: the step that matched it and the figures behind it.
+function idNote(kind, col, oldId, newId, link) {
+  const m = listed(kind)[newId], [one, many] = KINDS[kind];
+  const n = m && ((MATCHED[kind] || {}).by_step || {})[m.how];
+  return () => [el("div", { class: "why-k" }, `Same ${one}, new ${col}`), pair(oldId, newId),
+    el("p", {}, m ? stepNote(kind, m.how, m) : `Matched by content: the old ${one} ${oldId} is ${newId} in the new release.`),
+    m ? el("p", { class: "why-step" }, `Step “${m.how}”`, n ? `, which matched ${plural(n, one, many)}.` : ".") : null,
+    link ? matchLink(kind, `Every ${one} with a new ${kind}_id`) : null];
+}
+
+// The "?" next to a key that changed: how its entity was matched.
+function idWhy(f, c, oldId, newId) {
+  const kind = ((D.id_columns || {})[f.name] || {})[c];
+  if (KINDS[kind]) return why(idNote(kind, c, oldId, newId, true), `How ${c} ${newId} was matched`);
+  if (f.name === "stop_times.txt" && c === "stop_sequence") {
+    return why(() => [el("div", { class: "why-k" }, "Same stop, new stop_sequence"), pair(oldId, newId),
+      el("p", {}, "A matched trip's stop times pair by stop, not by stop_sequence: this row is the trip's call at the same stop, numbered differently."),
+      matchLink(null, "How IDs were matched")], "Why stop_sequence changed");
+  }
+  return null;
+}
+
+// Entity files: how many of their IDs changed.
+function renamedNote(f) {
+  const kind = FILE_KIND[f.name], e = MATCHED[kind];
+  if (!e || !e.matched_new_id) return null;
+  const n = e.matched_new_id, [one, many] = KINDS[kind];
+  return el("div", { class: "note" }, `${plural(n, one, many)} ${n === 1 ? "has" : "have"} a new ${kind}_id, matched to the old ${n === 1 ? one : many} by content`,
+    (D.metadata.parameters || {}).include_key_changes ? ". The new IDs are listed as changes. " : ", so a new ID alone is not a change. ",
+    el("button", { class: "link", onclick: () => goMatching(kind) }, n === 1 ? "See how it was matched" : "See how they were matched", icon("arrow")));
+}
+
+function matchingTab() {
+  if (!D.matching) return el("div", { class: "empty" }, "ID matching was off for this run (--no-id-matching), so rows were compared by ID.");
+  return [matchingSection(), changedIds()];
+}
+
+function matchingSection() {
+  const M = D.matching;
+  const sec = el("section", { class: "sec", id: "matching" },
+    el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "How IDs were matched"),
+      el("p", { class: "sec-sub" }, "Before rows are compared, each entity is paired with its old self by content, so one whose ID changed is not removed and added. Pick a step to list its IDs; ? says what it compares."))));
+  if (M.error) return put(sec, el("div", { class: "note" }, "ID matching failed, so rows were compared by ID: ", el("span", { class: "mono" }, M.error)));
+  const kinds = KIND_ORDER.filter(k => MATCHED[k]);
+  if (!kinds.length) return put(sec, el("p", { class: "quiet" }, "Nothing was matched: the files that define entities are missing from one release."));
+  const head = el("div", { class: "im im-head", "aria-hidden": "true" }, el("span", {}, "Entity"),
+    ["Matched", "New ID", "Removed", "Added"].map(t => el("span", { class: "n" }, t)));
+  return put(sec, head, kinds.map(k => {
+    const e = MATCHED[k], [one, many] = KINDS[k];
+    const n = (v, label, c) => el("span", { class: "n" + (!v ? " z" : c ? " " + c : "") }, fmt(v), el("span", { class: "lbl" }, label));
+    const steps = Object.entries(e.by_step || {}).sort((a, b) => b[1] - a[1]);
+    const renamed = new Set(Object.values(listed(k)).map(m => m.how));
+    return el("div", { class: "im" },
+      el("span", { class: "nm" }, upper1(many), el("small", {}, e.file)),
+      n(e.matched, "matched"), n(e.matched_new_id, "with a new ID"), n(e.unmatched_base, "removed", "t-del"), n(e.unmatched_new, "added", "t-add"),
+      steps.length ? el("div", { class: "im-steps" }, steps.map(([how, c]) => el("span", { class: "step" },
+        renamed.has(how) ? el("button", { class: "steplink", title: `List the ${many} this step matched under a new ID`, onclick: () => goMatching(k, how) }, how) : how,
+        el("b", {}, fmt(c)),
+        why(() => [el("div", { class: "why-k" }, `${upper1(many)} · ${how}`), el("p", {}, stepNote(k, how)),
+          el("p", { class: "why-step" }, `${plural(c, one, many)} matched this way.`)], `What “${how}” compares`)))) : null,
+      matchFine(e));
+  }));
+}
+
+// A pair's figures, in a few words.
+function figures(m) {
+  if (m.meters != null) return `${m.meters ? `${metres(m.meters)} apart` : "same coordinates"}, ${m.same_name ? "same name" : "another name"}`;
+  if (m.shared != null) return `${pct(m.shared)} of stops shared${m.shift_s != null ? `, times within ${mins(m.shift_s)}` : ""}`;
+  if (m.shift_s != null) return m.shift_s ? `times moved ${mins(m.shift_s)}` : "same times";
+  if (m.trips != null) return `${plural(m.trips, "matched trip")} link them`;
+  return null;
+}
+
+function changedIds() {
+  const kinds = KIND_ORDER.filter(k => (MATCHED[k] || {}).matched_new_id);
+  const sec = el("section", { class: "sec", id: "changed-ids" },
+    el("div", { class: "sec-head" }, el("div", {}, el("h2", {}, "IDs that changed"),
+      el("p", { class: "sec-sub" }, "Entities matched under a new ID: the old ID, the new one, and the step that paired them."))));
+  if (!kinds.length) return put(sec, el("p", { class: "clear" }, icon("check"), "Every matched entity kept its ID."));
+  if (!kinds.includes(state.idKind)) Object.assign(state, { idKind: kinds[0], idStep: null });
+  const k = state.idKind, [one, many] = KINDS[k], col = `${k}_id`, total = MATCHED[k].matched_new_id;
+  const rank = Object.entries(MATCHED[k].by_step).sort((a, b) => b[1] - a[1]).map(([how]) => how);
+  let rows = Object.entries(listed(k)).map(([id, m]) => ({ id, ...m }))
+    .sort((a, b) => rank.indexOf(a.how) - rank.indexOf(b.how) || a.id.localeCompare(b.id, "en", { numeric: true }));
+  const all = rows.length;
+  if (state.idStep) rows = rows.filter(r => r.how === state.idStep);
+  const q = state.idQ.trim().toLowerCase();
+  if (q) rows = rows.filter(r => r.id.toLowerCase().includes(q) || r.old_id.toLowerCase().includes(q));
+
+  sec.append(el("div", { class: "chips", role: "tablist", style: "margin-bottom:6px" }, kinds.map(x =>
+    el("button", { class: "chipbtn" + (x === k ? " on" : ""), role: "tab", "aria-selected": String(x === k),
+      onclick: () => { Object.assign(state, { idKind: x, idStep: null, idQ: "", idPage: 0 }); render(); } },
+      upper1(KINDS[x][1]), el("span", { class: "c" }, fmt(MATCHED[x].matched_new_id))))));
+  const count = el("div", { class: "count" });
+  if (state.idStep) {
+    count.append(el("b", {}, `Step “${state.idStep}”`), ` · ${plural(rows.length, one, many)} listed · `,
+      el("button", { class: "link", onclick: () => { state.idStep = null; state.idPage = 0; render(); } }, "Show every step"));
+  } else if (q) count.append(el("b", {}, fmt(rows.length)), ` matching “${state.idQ.trim()}”`);
+  else put(count, all < total ? ["Listing ", el("b", {}, fmt(all)), ` of ${fmt(total)} ${many} with a new ${col}`] : [el("b", {}, fmt(total)), ` ${total === 1 ? one : many} with a new ${col}`]);
+  sec.append(el("div", { class: "toolbar" }, count, el("label", { class: "search" }, icon("search"),
+    el("input", { id: "idq", type: "search", placeholder: `Find a ${col}`, value: state.idQ, "aria-label": `Find a ${col}`,
+      oninput: e => { state.idQ = e.target.value; state.idPage = 0; render(); } }), state.idQ ? null : el("kbd", {}, "/"))));
+  if (!rows.length) return put(sec, el("div", { class: "empty" }, q ? "No listed ID matches." : "None listed."));
+
+  const pages = Math.ceil(rows.length / PAGE_SIZE);
+  state.idPage = Math.min(state.idPage, pages - 1);
+  const shown = rows.slice(state.idPage * PAGE_SIZE, (state.idPage + 1) * PAGE_SIZE);
+  sec.append(el("div", { class: "tablewrap" }, el("table", { class: "ids" },
+    el("thead", {}, el("tr", {}, el("th", {}, col), el("th", {}, "Matched by"), el("th", {}, "Figures"))),
+    el("tbody", {}, shown.map(r => el("tr", {},
+      el("td", {}, el("del", {}, r.old_id), el("span", { class: "arrow" }, "→"), el("ins", {}, r.id)),
+      el("td", { class: "how" }, r.how, why(idNote(k, col, r.old_id, r.id), `How ${col} ${r.id} was matched`)),
+      el("td", { class: "fig" }, figures(r) || "–")))))));
+  if (pages > 1) {
+    const to = n => () => { state.idPage = n; render(); };
+    const first = state.idPage * PAGE_SIZE + 1;
+    sec.append(el("div", { class: "pager" },
+      el("span", { style: "display:inline-flex" },
+        el("button", { class: "pg", "aria-label": "Previous page", disabled: state.idPage === 0 ? "" : null, onclick: to(state.idPage - 1) }, icon("left")),
+        el("button", { class: "pg", "aria-label": "Next page", disabled: state.idPage >= pages - 1 ? "" : null, onclick: to(state.idPage + 1) }, icon("right"))),
+      el("span", { class: "num" }, `${fmt(first)}–${fmt(first + shown.length - 1)} of ${fmt(rows.length)}`)));
+  }
+  if (all < total) sec.append(el("div", { class: "fine" }, `This page lists up to ${fmt(D.caps.ids)} ${many} per step, and those in the Files tab's rows.`));
+  return sec;
+}
+
+function matchFine(e) {
+  const out = [], ts = e.time_shift, ss = e.shared_stops;
+  if (ts && (ts.paired || ts.declined)) {
+    out.push(`Times shifted, up to ${fmt(ts.max_shift_minutes)} min: ${plural(ts.paired, "pair")}`
+      + (ts.paired ? `, the largest shift ${mins(ts.largest_shift_seconds)}.` : ".")
+      + (ts.declined ? ` ${plural(ts.declined, "trip")} left unpaired: another trip departs too close to be sure.` : ""));
+  }
+  if (ss && ss.paired) out.push(`Most stops shared, at least ${pct(ss.min_shared_stops)}: ${plural(ss.paired, "pair")}, the lowest sharing ${pct(ss.least_shared)}.`);
+  if (e.renumbered_stops) out.push(`${plural(e.renumbered_stops, "matched trip")} ${e.renumbered_stops === 1 ? "has" : "have"} new stop_sequence values; their stop times pair by stop.`);
+  return out.length ? el("div", { class: "im-fine" }, out.map(t => el("div", {}, t))) : null;
 }
 
 /* ---------- Shape geometry ---------- */
@@ -1270,7 +1621,7 @@ function shapeSummary(i) {
   const gap = shapeGap(i);
   if (i.change === "added") return i.new_len != null ? `${metres(i.new_len)} long` : "new";
   if (i.change === "deleted") return i.base_len != null ? `${metres(i.base_len)} long` : "removed";
-  if (i.change === "renamed") return "same points";
+  if (i.change === "renamed") return "same line";
   return gap == null ? "" : gap < 0.05 ? "the line did not move" : `moved up to ${metres(gap)}`;
 }
 
@@ -1376,7 +1727,7 @@ function showMap() {
       el("span", { class: "pos" }, `${mapIndex + 1} of ${mapList.length}`),
       el("button", { class: "iconbtn", "aria-label": "Next", title: "Next (→)", disabled: mapIndex >= mapList.length - 1 ? "" : null, onclick: step(1) }, icon("right"))] : null,
     el("button", { class: "iconbtn", "aria-label": "Close", title: "Close (Esc)", onclick: () => zoomDlg.close() }, icon("close")));
-  if (entry.item) shapeMap(entry.item); else stopMap(entry.stop);
+  if (entry.item) shapeMap(entry.item); else if (entry.order) orderView(entry.order); else stopMap(entry.stop);
   state.map = entry.item ? `${entry.item.base || ""}|${entry.item.new || ""}` : null;
   writeHash();
 }
@@ -1474,6 +1825,67 @@ function stopMap(h) {
   document.getElementById("zoom-body").replaceChildren(view, side);
 }
 
+// True when a highlight's row is among its file's rows on this page, false when
+// it is not, null when the page holds no rows of that file.
+function hasRow(h) {
+  const row = highlightRow(h), f = row && D.files.find(x => x.name === row.file);
+  const rows = f && f[row.part];
+  if (!rows || !f.primary_key) return null;
+  const pk = f.primary_key[0], at = (f.columns || []).indexOf(pk);
+  return rows.some(r => (Array.isArray(r) ? r[1][at] : r.id[pk]) === row.key);
+}
+
+// The stops both trips call at, old order against new, around the ones that
+// changed place.
+function orderView(h) {
+  const d = h.details || {}, A = d.base_order, B = d.new_order;
+  const name = id => (d.stop_names || {})[id] || id;
+  const moved = new Set((d.stops || []).map(s => s.stop_id));
+  swap(document.getElementById("zoom-title"),
+    el("span", { class: "k t-hl" }, "Stop order changed"),
+    el("span", { class: "t" }, `route ${d.route}`), el("span", { class: "s" }, plural(d.trips, "trip")));
+  const differ = A.map((s, i) => s !== B[i] ? i : -1).filter(i => i >= 0);
+  const lo = Math.max(0, Math.min(...differ) - 2), hi = Math.min(A.length - 1, Math.max(...differ) + 2);
+  const ROW = 36, W = innerWidth <= 900 ? 40 : 96, height = (hi - lo + 1) * ROW;
+  const posOf = order => Object.fromEntries(order.map((s, i) => [s, i]));
+  const posA = posOf(A), posB = posOf(B), y = i => (i - lo) * ROW + ROW / 2;
+  const column = order => el("div", {}, order.slice(lo, hi + 1).map((s, i) =>
+    el("div", { class: "ov-row" + (moved.has(s) ? " moved" : "") },
+      el("span", { class: "n" }, lo + i + 1), el("span", { class: "nm", title: name(s) }, name(s)), el("span", { class: "id" }, s))));
+  const svg = sv("svg", { class: "ov-links", width: W, height, viewBox: `0 0 ${W} ${height}`, "aria-hidden": "true" });
+  const inView = A.slice(lo, hi + 1);
+  for (const s of [...inView.filter(s => !moved.has(s)), ...inView.filter(s => moved.has(s))]) {
+    const cls = moved.has(s) ? "moved" : null;
+    svg.append(sv("line", { x1: 4, y1: y(posA[s]), x2: W - 4, y2: y(posB[s]), class: cls }),
+      sv("circle", { cx: 4, cy: y(posA[s]), r: 3, class: cls }), sv("circle", { cx: W - 4, cy: y(posB[s]), r: 3, class: cls }));
+  }
+  const gap = text => [el("div", { class: "ov-gap" }, text), el("div"), el("div", { class: "ov-gap" }, text)];
+  const later = A.length - 1 - hi;
+  const ex = [refId(h, "stop_times.txt", "base"), refId(h, "stop_times.txt", "new")];
+  const view = el("div", { class: "orderview" },
+    el("div", { class: "ov-grid", style: `grid-template-columns: minmax(0, 1fr) ${W}px minmax(0, 1fr)` },
+      el("h3", {}, "Old order"), el("div"), el("h3", {}, "New order"),
+      lo ? gap(plural(lo, "earlier stop")) : null,
+      column(A), el("div", {}, svg), column(B),
+      later ? gap(plural(later, "later stop")) : null),
+    el("p", { class: "ov-note" }, "The stops both trips call at, numbered in each trip's order."));
+  const trips = ex[0] === ex[1] ? [["Example trip", ex[0]]] : [["Old trip", ex[0]], ["New trip", ex[1]]];
+  const after = id => id ? `after ${name(id)}` : "first";
+  const found = hasRow(h);
+  const side = el("aside", { class: "side" },
+    el("div", { class: "big" }, plural(moved.size, "stop")),
+    el("div", { class: "big-sub" }, `changed place, on ${plural(d.trips, "trip")}.`),
+    el("dl", { class: "facts" }, [["Route", d.route], ["route_id", d.route_id], ...trips]
+      .map(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+    el("h3", {}, "Changed place"),
+    el("div", {}, (d.stops || []).map(s => el("div", { class: "ov-move" },
+      el("div", { class: "nm" }, name(s.stop_id)), el("div", { class: "muted" }, `Now ${after(s.new_after)}; was ${after(s.base_after)}.`)))),
+    found == null ? null : [el("h3", {}, "In the files"), found
+      ? el("button", { class: "link", onclick: () => { zoomDlg.close(); showRow(h); } }, "See this trip's rows in stop_times.txt", icon("arrow"))
+      : el("p", { class: "muted ov-p" }, "None of this trip's rows changed in stop_times.txt: the times are the same, and a new stop_sequence alone is not a change.")]);
+  document.getElementById("zoom-body").replaceChildren(view, side);
+}
+
 zoomDlg.addEventListener("close", () => { state.map = null; writeHash(); });
 zoomDlg.addEventListener("click", e => { if (e.target === zoomDlg) zoomDlg.close(); });
 
@@ -1486,13 +1898,16 @@ function tabInfo() {
     ["overview", "Overview", "grid", null, highlightTotal ? "Notable highlights, changes by file" : "Changes by file"],
     ["files", "Files", "file", changedFiles.length || null, "Every changed row, old → new"],
     ["shapes", "Shapes", "route", shapes || null, S ? "Old and new lines on a map" : "Not compared in this run"],
+    ["matching", "ID matching", "swap", D.matching && sum(Object.values(MATCHED).map(e => e.matched_new_id)) || null,
+      D.matching ? "Old IDs → new, and how each was paired" : "Off in this run", "IDs"],
   ];
 }
 
 function tabsBar() {
-  swap(document.getElementById("tabs"), tabInfo().map(([k, label, ic, n, what]) =>
+  swap(document.getElementById("tabs"), tabInfo().map(([k, label, ic, n, what, short]) =>
     el("button", { class: "tab" + (state.tab === k ? " on" : ""), "aria-current": state.tab === k ? "page" : null, title: what, onclick: () => setTab(k) },
-      icon(ic), el("span", { class: "lb" }, label, n != null ? el("span", { class: "c" }, fmt(n)) : null), el("span", { class: "ds" }, what))));
+      icon(ic), el("span", { class: "lb" }, short ? [el("span", { class: "long" }, label), el("span", { class: "short" }, short)] : label,
+        n != null ? el("span", { class: "c" }, fmt(n)) : null), el("span", { class: "ds" }, what))));
 }
 
 function nextTabs() {
@@ -1515,13 +1930,15 @@ function writeHash() {
   p.set("tab", state.tab);
   if (state.tab === "files" && state.file) { p.set("file", state.file); if (state.part) p.set("rows", state.part); if (state.col) p.set("column", state.col); }
   if (state.tab === "shapes" && state.shape !== "all") p.set("kind", state.shape);
+  if (state.tab === "matching" && state.idKind) { p.set("ids", state.idKind); if (state.idStep) p.set("step", state.idStep); }
   if (state.map) p.set("shape", state.map);
   history.replaceState(null, "", "#" + p.toString());
 }
 
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
-  if (["overview", "files", "shapes"].includes(p.get("tab"))) state.tab = p.get("tab");
+  if (["overview", "files", "shapes", "matching"].includes(p.get("tab"))) state.tab = p.get("tab");
+  if (KINDS[p.get("ids")]) { state.idKind = p.get("ids"); state.idStep = p.get("step"); }
   if (p.get("file") && ALL_FILES.some(f => f.name === p.get("file"))) state.file = p.get("file");
   if (p.get("rows")) state.part = p.get("rows");
   if (p.get("column")) state.col = p.get("column");
@@ -1533,7 +1950,8 @@ function render(animate) {
   const active = document.activeElement, keep = active && active.id ? [active.id, active.selectionStart, active.selectionEnd] : null;
   tabsBar();
   const main = document.getElementById("main");
-  swap(main, state.tab === "files" ? filesTab() : state.tab === "shapes" ? shapesTab() : overviewTab(), nextTabs());
+  const tabs = { files: filesTab, shapes: shapesTab, matching: matchingTab };
+  swap(main, (tabs[state.tab] || overviewTab)(), nextTabs());
   if (animate) { main.parentElement.classList.remove("enter"); void main.offsetWidth; main.parentElement.classList.add("enter"); }
   if (keep) {
     const n = document.getElementById(keep[0]);
@@ -1554,7 +1972,7 @@ document.addEventListener("keydown", e => {
     return;
   }
   if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) {
-    const box = document.getElementById("rowq") || document.getElementById("shapeq");
+    const box = document.getElementById("rowq") || document.getElementById("shapeq") || document.getElementById("idq");
     if (box) { e.preventDefault(); box.focus(); box.select(); }
   }
   if (e.key === "Escape" && typing && e.target.value) { e.target.value = ""; e.target.dispatchEvent(new Event("input")); }

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..geometry import sql_path
 from ..tracing import _trace
 from .core import (
     SHIFT_ISOLATION_MIN,
@@ -39,8 +40,10 @@ class TripsMixin:
     def match_trips(self) -> None:
         self.ids("trip", "trips", "trip_id", "WHERE trip_id IS NOT NULL")
         if not self.has("stops.txt"):
+            # Stops are not matched, so trips compare them by ID.
             self.con.execute(
-                "CREATE TABLE stop_sig_map (old_stop VARCHAR, new_stop VARCHAR)"
+                "CREATE TABLE stop_sig_map AS SELECT DISTINCT stop_id AS old_stop, "
+                "stop_id AS new_stop FROM old_stop_times WHERE stop_id IS NOT NULL"
             )
         for side in ("old", "new"):
             self.build_trip_info(side)
@@ -61,7 +64,49 @@ class TripsMixin:
             self.pair_trip_shifts()
         if self.min_shared_stops < 1:
             self.pair_trip_stop_changes()
+        self.pair_trip_same_id()
         self.map_stop_sequences()
+
+    def pair_trip_same_id(self) -> None:
+        """
+        Unpaired trips that kept their ID, route and direction and start at most
+        the time shift threshold apart, such as a trip retimed among others the
+        time shift step could not tell apart. Skipped when the matched trips
+        mostly changed ID, since a regenerated ID says nothing about the trip.
+        """
+        renamed, kept = self.con.execute(
+            "SELECT count(*) FILTER (WHERE old_id <> new_id), "
+            "count(*) FILTER (WHERE old_id = new_id) FROM pairs_trip"
+        ).fetchone()
+        if renamed > kept:
+            return
+        self.con.execute(
+            f"""
+            CREATE TEMP TABLE same_id_trips AS
+            SELECT o.trip_id FROM old_trip_info o JOIN new_trip_info n USING (trip_id)
+            WHERE (o.route_name = n.route_name
+                   OR o.route_id IS NOT DISTINCT FROM n.route_id)
+              AND o.direction_id IS NOT DISTINCT FROM n.direction_id
+              AND o.trip_id NOT IN {self.left("trip", "old")}
+              AND n.trip_id NOT IN {self.left("trip", "new")}
+            """
+        )
+        time = f"coalesce({_seconds('departure_time')}, {_seconds('arrival_time')})"
+
+        def starts(side: str) -> str:
+            return f"""
+                SELECT trip_id,
+                       arg_min({time}, try_cast(stop_sequence AS DOUBLE)) AS t
+                FROM {side}_stop_times
+                WHERE trip_id IN (SELECT trip_id FROM same_id_trips)
+                GROUP BY trip_id"""
+
+        self.add_pairs(
+            "trip",
+            f"""SELECT o.trip_id, n.trip_id, 'same id'
+                FROM ({starts("old")}) o JOIN ({starts("new")}) n USING (trip_id)
+                WHERE abs(n.t - o.t) <= {self.max_shift_min * 60}""",
+        )
 
     def map_stop_sequences(self) -> None:
         """The old stop_sequence for each stop_times row of a matched trip, by
@@ -97,7 +142,7 @@ class TripsMixin:
             """
         )
         path = str(Path(self.result.workdir) / "stop_sequence.parquet")
-        self.con.execute(f"COPY sequence_keys TO '{path}' (FORMAT parquet)")
+        self.con.execute(f"COPY sequence_keys TO {sql_path(path)} (FORMAT parquet)")
         self.result.sequence_parquet = path
         self.result.sequence = {
             (trip, new): old
@@ -111,11 +156,12 @@ class TripsMixin:
         """
         Unpaired trips with the same agency, route name, service dates (then
         weekly pattern) and direction that share at least min_shared_stops of
-        their stops (counted on the longer trip) but not all of them, with
-        times at the shared stops at most the time shift threshold apart. A pair
-        is kept only when each trip is the other's only candidate, and no other
-        unpaired trip of the same route departs between their first times or
-        within twice the largest time change of them.
+        their stops in the same order, but not all of them, with times at the
+        shared stops at most the time shift threshold apart. Shares count on the
+        longer trip, and each place the order breaks counts as a stop not
+        shared. A pair is kept only when each trip is the other's only
+        candidate, and no other unpaired trip of the same route departs between
+        their first times or within twice the largest time change of them.
         """
         limit = self.max_shift_min * 60
         near = (
@@ -139,7 +185,7 @@ class TripsMixin:
                 self.con.execute(
                     f"""
                     CREATE OR REPLACE TABLE {side}_part_calls AS
-                    SELECT trip_id, stop, t, row_number() OVER (
+                    SELECT trip_id, stop, seq, t, row_number() OVER (
                                PARTITION BY trip_id, stop ORDER BY seq) AS visit
                     FROM (
                         SELECT s.trip_id, {stop} AS stop,
@@ -175,11 +221,11 @@ class TripsMixin:
                     FROM old_part_key o JOIN new_part_key n USING (key)
                     WHERE abs(n.first_time - o.first_time) <= {limit}
                 ),
-                scored AS (
+                grouped AS (
                     SELECT c.old_id, c.new_id, c.key, c.old_first, c.new_first,
-                           c.longer,
-                           count(*) / c.longer AS shared,
-                           max(abs(nc.t - oc.t)) AS shift_s
+                           c.longer, count(*) AS n,
+                           max(abs(nc.t - oc.t)) AS shift_s,
+                           list(oc.seq ORDER BY nc.seq) AS seqs
                     FROM c
                     JOIN old_part_calls oc ON oc.trip_id = c.old_id
                     JOIN new_part_calls nc ON nc.trip_id = c.new_id
@@ -187,8 +233,21 @@ class TripsMixin:
                     GROUP BY c.old_id, c.new_id, c.key, c.old_first, c.new_first,
                              c.longer
                     HAVING count(*) / c.longer >= {self.min_shared_stops}
-                       AND count(*) < c.longer
                        AND max(abs(nc.t - oc.t)) <= {limit}
+                ),
+                -- A shared stop called before the one it followed breaks the
+                -- order, and counts as a stop not shared.
+                scored AS (
+                    SELECT old_id, new_id, key, old_first, new_first, longer,
+                           n / longer AS shared, shift_s
+                    FROM (
+                        SELECT *, len(list_filter(range(1, len(seqs)),
+                                                  i -> seqs[i + 1] < seqs[i]))
+                                      AS breaks
+                        FROM grouped
+                    )
+                    WHERE (n - breaks) / longer >= {self.min_shared_stops}
+                      AND (n < longer OR breaks > 0)
                 )
                 SELECT * FROM scored u
                 WHERE (SELECT count(*) FROM scored x WHERE x.old_id = u.old_id) = 1
@@ -378,7 +437,9 @@ class TripsMixin:
         self.con.execute(
             f"""
             CREATE TABLE {side}_trip_info AS
-            SELECT t.trip_id, t.service_id, t.direction_id,
+            SELECT t.trip_id, t.service_id, t.direction_id, t.route_id,
+                   coalesce(t.trip_headsign, '') || '|'
+                       || coalesce(t.trip_short_name, '') AS label,
                    coalesce(a.agency_name,
                             (SELECT min(agency_name) FROM {side}_agency), '') AS agency,
                    coalesce(r.route_type, '') || '|' ||
@@ -488,6 +549,37 @@ class TripsMixin:
                 """,
                 [lo, hi, lo, hi],
             )
+            # A service with no dates both feeds cover is told apart by its
+            # weekly pattern over its own dates, not lumped in with the others.
+            self.con.execute(
+                f"""
+                CREATE TEMP TABLE {side}_own_pattern AS
+                WITH span AS (
+                    SELECT service_id, min(d) AS d0,
+                           datediff('day', min(d), max(d)) AS span
+                    FROM {side}_dates GROUP BY service_id
+                ),
+                active AS (
+                    SELECT service_id, dayofweek(d) AS dow, count(*) AS runs
+                    FROM {side}_dates GROUP BY ALL
+                )
+                SELECT service_id, 'own ' || list_sort(list(a.dow) FILTER (
+                           WHERE a.runs * 2 >= (s.span - (a.dow - dayofweek(s.d0)
+                                                          + 7) % 7) // 7 + 1
+                       ))::VARCHAR AS days
+                FROM active a JOIN span s USING (service_id)
+                GROUP BY service_id
+                """
+            )
+            for table in ("days", "pattern"):
+                self.con.execute(
+                    f"""
+                    INSERT INTO {side}_{table}
+                    SELECT service_id, days FROM {side}_own_pattern
+                    WHERE days IS NOT NULL
+                      AND service_id NOT IN (SELECT service_id FROM {side}_{table})
+                    """
+                )
 
     def trip_signatures(self, days: str | None, names: bool) -> None:
         for side in ("old", "new"):
@@ -499,7 +591,7 @@ class TripsMixin:
             self.con.execute(
                 f"""
                 CREATE TABLE {side}_sig AS
-                SELECT t.trip_id,
+                SELECT t.trip_id, t.label,
                        md5({key} || '|' || coalesce(t.direction_id, '')
                            || '|' || c.n || '|' || c.h) AS sig
                 FROM {side}_trip_info t
@@ -511,8 +603,9 @@ class TripsMixin:
     def pair_trip_signatures(self, tier: str, unique: bool) -> None:
         """
         One-to-one pairs with equal signatures among unpaired trips: same trip_id
-        first, then in trip_id order. With *unique*, the trips not paired by
-        trip_id pair only when their signature occurs once on each side.
+        first, then the same headsign and short name, then in trip_id order. With
+        *unique*, the trips not paired by trip_id pair only when their signature
+        occurs once on each side.
         """
         only_once = "QUALIFY count(*) OVER (PARTITION BY sig) = 1" if unique else ""
         self.con.execute(
@@ -538,17 +631,27 @@ class TripsMixin:
                 SELECT * FROM n WHERE trip_id NOT IN (SELECT new_id FROM same_id)
                 {only_once}
             ),
+            same_label AS (
+                SELECT o.trip_id AS old_id, n.trip_id AS new_id
+                FROM (SELECT *, row_number() OVER (
+                          PARTITION BY sig, label ORDER BY trip_id) AS k FROM ro) o
+                JOIN (SELECT *, row_number() OVER (
+                          PARTITION BY sig, label ORDER BY trip_id) AS k FROM rn) n
+                  USING (sig, label, k)
+            ),
             rest_old AS (
                 SELECT sig, trip_id,
                        row_number() OVER (PARTITION BY sig ORDER BY trip_id) AS k
-                FROM ro
+                FROM ro WHERE trip_id NOT IN (SELECT old_id FROM same_label)
             ),
             rest_new AS (
                 SELECT sig, trip_id,
                        row_number() OVER (PARTITION BY sig ORDER BY trip_id) AS k
-                FROM rn
+                FROM rn WHERE trip_id NOT IN (SELECT new_id FROM same_label)
             )
             SELECT old_id, new_id, '{tier}' FROM same_id
+            UNION ALL
+            SELECT old_id, new_id, '{tier}' FROM same_label
             UNION ALL
             SELECT o.trip_id, n.trip_id, '{tier}'
             FROM rest_old o JOIN rest_new n USING (sig, k)

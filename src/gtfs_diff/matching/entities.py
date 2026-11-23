@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..geometry import coord_sql
 from .core import (
     METERS_PER_DEGREE,
     MIN_COS_LAT,
@@ -30,19 +31,21 @@ class EntitiesMixin:
 
     def match_stops(self) -> None:
         """
-        Each old stop maps to the nearest new stop within STOP_RADIUS_M, same name
-        first and, among those, the stop with its own ID (stop_sig_map, used by
-        trip signatures). Stop pairs are the mutual picks, then the same ID.
+        Each old stop maps to the nearest new stop of its location_type within
+        STOP_RADIUS_M, same name first and, among those, the stop with its own ID
+        (stop_sig_map, used by trip signatures). Stop pairs are the mutual picks,
+        then the same ID.
         """
         self.ids("stop", "stops", "stop_id", "WHERE stop_id IS NOT NULL")
         lat_cell = STOP_RADIUS_M / METERS_PER_DEGREE
         lon_cell = lat_cell / MIN_COS_LAT
-        points = """SELECT stop_id, stop_name, try_cast(stop_lat AS DOUBLE) AS lat,
-                           try_cast(stop_lon AS DOUBLE) AS lon
-                    FROM {}_stops
-                    WHERE try_cast(stop_lat AS DOUBLE) IS NOT NULL
-                      AND try_cast(stop_lon AS DOUBLE) IS NOT NULL
-                      AND stop_id IS NOT NULL"""
+        points = f"""SELECT * FROM (
+                        SELECT stop_id, stop_name,
+                               coalesce(location_type, '0') AS location_type,
+                               {coord_sql("stop_lat", 90)} AS lat,
+                               {coord_sql("stop_lon", 180)} AS lon
+                        FROM {{}}_stops WHERE stop_id IS NOT NULL)
+                    WHERE lat IS NOT NULL AND lon IS NOT NULL"""
         self.con.execute(
             f"""
             CREATE TABLE stop_candidates AS
@@ -65,6 +68,7 @@ class EntitiesMixin:
                        + pow((n.lon - o.lon) * cos(radians(o.lat)), 2)
                    ) AS meters
             FROM o JOIN n ON n.cy = o.cy AND n.cx = o.cx
+                         AND n.location_type = o.location_type
             WHERE meters <= {STOP_RADIUS_M}
             """
         )

@@ -19,14 +19,19 @@ from ..gtfs_definitions import (
     get_primary_key,
 )
 from ..highlights import (
+    DEFAULT_FARE_CHANGED_PCT,
     DEFAULT_SHAPE_MOVED_M,
     DEFAULT_STOP_MOVED_M,
+    FARE_COLUMNS,
+    FEATURE_COLUMNS,
     highlights_section,
     keep_rows,
 )
 from ..matching import (
+    DEFAULT_SHAPE_TOLERANCE_M,
     DEFAULT_TRIP_MAX_SHIFT_MIN,
     DEFAULT_TRIP_MIN_SHARED_STOPS,
+    ID_COLUMNS,
     MATCH_COLUMNS,
     MatchResult,
     ShapeChange,
@@ -46,6 +51,9 @@ from .files import DEFAULT_LARGE_FILE_THRESHOLD_BYTES, _diff_file
 from .helpers import (
     _processing_order,
 )
+
+# Changed IDs kept per matching step, for the report to list.
+ID_EXAMPLES_PER_STEP = 100
 
 
 def _read_schema_version() -> str:
@@ -178,9 +186,15 @@ class DiffRun:
     parameters: dict = field(default_factory=dict)
     # Files compared and found equal: [{"file_name", "rows"}].
     files_unchanged: list[dict] = field(default_factory=list)
+    # The highlight checks that ran (see MatchResult.highlight_checks).
+    highlight_checks: list[str] | None = None
     # {file name: {base line number: key as published in the new feed}} for
     # modified rows whose key changed (matched entities with new IDs).
     new_identifiers: dict[str, dict[int, dict[str, str]]] = field(default_factory=dict)
+    # How changed IDs were matched, for those in modified rows' keys and the
+    # first ID_EXAMPLES_PER_STEP of each step:
+    # {kind: {new ID: {"old_id", "how", and the figures behind it}}}.
+    id_matches: dict[str, dict[str, dict]] = field(default_factory=dict)
     # Time the run took, from opening the feeds to the finished diff.
     duration_seconds: float | None = None
 
@@ -204,14 +218,18 @@ def run_diff(
     as_of: date | None = None,
     highlight_stop_moved_m: float = DEFAULT_STOP_MOVED_M,
     highlight_shape_moved_m: float = DEFAULT_SHAPE_MOVED_M,
+    highlight_fare_changed_pct: float = DEFAULT_FARE_CHANGED_PCT,
+    shape_tolerance_m: float = DEFAULT_SHAPE_TOLERANCE_M,
 ) -> DiffRun:
     """:func:`diff_feeds`, also returning what the diff document leaves out.
 
     With *id_matching*, the diff has notable highlights: service days from
     *as_of* (default today) that lost all their trips, removed stops, and stops
     and shapes that moved at least *highlight_stop_moved_m* /
-    *highlight_shape_moved_m* metres. With *shape_geometry*, the run also has
-    every changed shape's points.
+    *highlight_shape_moved_m* metres, and fares whose price changed by at least
+    *highlight_fare_changed_pct* percent. Shapes whose old and new lines stay
+    within *shape_tolerance_m* of each other are unchanged. With
+    *shape_geometry*, the run also has every changed shape's points.
     """
     started = time.monotonic()
     now = datetime.now(timezone.utc)
@@ -239,14 +257,17 @@ def run_diff(
         "trip_min_shared_stops": trip_min_shared_stops,
         "include_key_changes": include_key_changes,
         "shape_geometry": shape_geometry,
+        "shape_tolerance_m": shape_tolerance_m,
         "as_of": (as_of or date.today()).isoformat(),
         "highlight_stop_moved_m": highlight_stop_moved_m,
         "highlight_shape_moved_m": highlight_shape_moved_m,
+        "highlight_fare_changed_pct": highlight_fare_changed_pct,
     }
     highlight_settings = {
         "as_of": as_of or date.today(),
         "stop_moved_m": highlight_stop_moved_m,
         "shape_moved_m": highlight_shape_moved_m,
+        "fare_changed_pct": highlight_fare_changed_pct,
     }
 
     with (
@@ -263,6 +284,7 @@ def run_diff(
                 include_key_changes,
                 highlight_settings,
                 trip_min_shared_stops,
+                shape_tolerance_m,
             )
             if match is not None:
                 cleanup.callback(match.close)
@@ -356,6 +378,9 @@ def run_diff(
             file_diffs.append(file_diff)
             file_summaries.append(file_summary)
 
+        new_identifiers = _take_new_identifiers(file_diffs)
+        id_matches = _explain(match, new_identifiers) if match else {}
+
     # Restore a deterministic, file-name-sorted output order (independent of the
     # dependency-driven processing order).
     file_diffs.sort(key=lambda fd: fd.file_name)
@@ -412,10 +437,12 @@ def run_diff(
     return DiffRun(
         diff=result,
         shape_changes=match.shape_changes if match else None,
+        highlight_checks=match.highlight_checks if match else None,
         matching=matching_summary,
         parameters=parameters,
         files_unchanged=sorted(files_unchanged, key=lambda f: f["file_name"]),
-        new_identifiers=_take_new_identifiers(file_diffs),
+        new_identifiers=new_identifiers,
+        id_matches=id_matches,
         duration_seconds=round(time.monotonic() - started, 2),
     )
 
@@ -449,6 +476,23 @@ def _take_new_identifiers(file_diffs: list[FileDiff]) -> dict:
     return out
 
 
+def _explain(match: MatchResult, new_identifiers: dict) -> dict:
+    """How the changed IDs in modified rows' keys, and examples of each
+    matching step, were matched."""
+    ids: dict[str, set[str]] = {}
+    for file_name, keys in new_identifiers.items():
+        kinds = ID_COLUMNS.get(file_name, {})
+        for key in keys.values():
+            for col, value in key.items():
+                if col in kinds:
+                    ids.setdefault(kinds[col], set()).add(value)
+    try:
+        return match.explain(ids, ID_EXAMPLES_PER_STEP)
+    except Exception as exc:
+        _trace(f"  could not explain changed IDs ({exc!r})")
+        return {}
+
+
 def _run_matching(
     base_handle: FeedHandle,
     new_handle: FeedHandle,
@@ -457,6 +501,7 @@ def _run_matching(
     include_key_changes: bool,
     highlights: dict,
     trip_min_shared_stops: float,
+    shape_tolerance_m: float,
 ) -> tuple[MatchResult | None, dict]:
     """Match entities across the feeds; on failure, diff by ID and say why."""
     from .duckdb_backend import _resolve_spill_base
@@ -468,7 +513,7 @@ def _run_matching(
             paths = []
             for handle in (base_handle, new_handle):
                 side = {}
-                for name in MATCH_COLUMNS:
+                for name in {*MATCH_COLUMNS, *FARE_COLUMNS, *FEATURE_COLUMNS}:
                     if name in handle.meta:
                         path = stack.enter_context(
                             _materialized_path(handle.meta[name])
@@ -484,6 +529,7 @@ def _run_matching(
                 trip_max_shift_min=trip_max_shift_minutes,
                 highlights=highlights,
                 trip_min_shared_stops=trip_min_shared_stops,
+                shape_tolerance_m=shape_tolerance_m,
             )
     except Exception as exc:
         _trace(f"  matching failed ({exc!r}) — diffing by ID")

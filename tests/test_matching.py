@@ -115,6 +115,9 @@ class TestIdMatching:
         entities = run.matching["entities"]
         for kind in ("trip", "stop", "route", "service", "shape"):
             assert entities[kind]["matched_new_id"] == entities[kind]["matched"] > 0
+        # No row changed, but the report still lists how the IDs were matched.
+        assert run.id_matches["trip"]["X1"] == {"old_id": "T1", "how": "exact days"}
+        assert run.id_matches["service"]["SV9"]["how"] == "trip votes"
 
     @pytest.mark.parametrize("threshold", [None, 0])
     def test_include_key_changes(self, tmp_path: Path, threshold):
@@ -149,6 +152,40 @@ class TestIdMatching:
         }
         assert changes("shapes.txt") == {("shape_id", "SH1", "SH9")}
         assert changes("routes.txt") == {("route_id", "R1", "R9")}
+
+    def test_changed_ids_say_how_they_matched(self, tmp_path: Path):
+        base, new = _zips(
+            tmp_path,
+            _feed(BASE_TRIPS),
+            _feed([("X1", "08"), ("X2", "09:10")], route="R9", stops=("N1", "N2")),
+        )
+        run = run_diff(base, new, include_key_changes=True)
+        assert run.id_matches["trip"] == {
+            "X1": {"old_id": "T1", "how": "exact days"},
+            "X2": {"old_id": "T2", "how": "time shift 10 min", "shift_s": 600},
+        }
+        assert run.id_matches["stop"]["N1"] == {
+            "old_id": "S1",
+            "how": "same place",
+            "meters": 0.0,
+            "same_name": True,
+        }
+        assert run.id_matches["route"] == {
+            "R9": {"old_id": "R1", "how": "trip votes", "trips": 2}
+        }
+        assert "service" not in run.id_matches  # WK kept its ID
+
+        html = render_html(run)
+        data = json.loads(
+            re.search(
+                r'<script id="data" type="application/json">(.*?)</script>', html, re.S
+            )
+            .group(1)
+            .replace("<\\/", "</")
+        )
+        assert data["id_matches"]["trip"]["X2"]["shift_s"] == 600
+        assert data["id_columns"]["stop_times.txt"]["trip_id"] == "trip"
+        assert data["matching"]["entities"]["trip"]["matched_new_id"] == 2
 
     def test_without_matching_ids_decide(self, tmp_path: Path):
         base, new = _zips(
@@ -278,6 +315,16 @@ class TestIdMatching:
 
         for name in ("trips.txt", "stop_times.txt", "stops.txt"):
             assert rows(in_memory, name) == rows(on_disk, name)
+
+
+def test_zip_from_a_mac_ignores_its_metadata(tmp_path: Path):
+    """A zipped folder from macOS: files in a subfolder, plus __MACOSX/._ copies."""
+    files = {f"feed/{n}": text for n, text in _feed(BASE_TRIPS).items()}
+    files |= {f"__MACOSX/feed/._{n}": "\x00\x05" for n in _feed(BASE_TRIPS)}
+    base, new = _zips(tmp_path, files, _feed(BASE_TRIPS))
+    diff = run_diff(base, new).diff
+    assert diff.metadata.unsupported_files == []
+    assert diff.summary.total_changes == 0
 
 
 class TestTripTimeShift:
@@ -434,6 +481,17 @@ class TestTripStopChanges:
         summary = run_diff(base, new).matching["entities"]["trip"]
         assert summary["by_step"]["most stops shared"] == 2
 
+    def test_reordered_trip_pairs(self, tmp_path: Path):
+        swapped = [1, 3, 2, *TEN[3:]]
+        _, summary = self._run(tmp_path, [("X1", "08", swapped), ("T2", "10", TEN)])
+        assert summary["by_step"]["most stops shared"] == 1
+
+    @pytest.mark.parametrize("stops", [TEN[::-1], [2, 1, 4, 3, *TEN[4:]]])
+    def test_trip_out_of_order_does_not_pair(self, tmp_path: Path, stops):
+        """Reversed, or two swaps: under 90% of the stops in the same order."""
+        _, summary = self._run(tmp_path, [("X1", "08", stops), ("T2", "10", TEN)])
+        assert "most stops shared" not in summary["by_step"]
+
     def test_one_turns_it_off(self, tmp_path: Path):
         without_5 = [i for i in TEN if i != 5]
         _, summary = self._run(
@@ -481,6 +539,37 @@ class TestShapeGeometry:
         assert len(moved) == (kind == "changed")
         if moved:
             assert moved[0].details["distance_m"] == change.deviation_m
+
+    @pytest.mark.parametrize(
+        ("shape", "tolerance", "kind"),
+        [("SH1", 1, "same"), ("SH1", 0, "redrawn"), ("SH2", 1, "renamed")],
+    )
+    def test_under_the_tolerance_is_the_same_line(
+        self, tmp_path, shape, tolerance, kind
+    ):
+        """About 0.9 m apart, as export rounding can do."""
+        base, new = _zips(
+            tmp_path,
+            _feed(BASE_TRIPS),
+            _feed(BASE_TRIPS, shape=shape, shape_offset=0.000008),
+        )
+        run = run_diff(base, new, shape_geometry=True, shape_tolerance_m=tolerance)
+        assert run.matching["entities"]["shape"]["changes"][kind] == 1
+        assert [c.change for c in run.shape_changes] == (
+            [] if kind == "same" else [kind]
+        )
+
+    def test_dropped_point_on_the_line_is_not_an_edit(self, tmp_path: Path):
+        new = _feed(BASE_TRIPS)
+        new["shapes.txt"] = SHAPES_HEADER + "".join(
+            row
+            for row in _shape("SH1").splitlines(keepends=True)
+            if not row.endswith(",10\n")
+        )
+        base, new = _zips(tmp_path, _feed(BASE_TRIPS), new)
+        run = run_diff(base, new, shape_geometry=True)
+        assert run.matching["entities"]["shape"]["changes"]["same"] == 1
+        assert run.shape_changes == []
 
     def test_geometry_is_off_by_default(self, tmp_path: Path):
         base, new = _zips(tmp_path, _feed(BASE_TRIPS), _feed(BASE_TRIPS))
@@ -575,6 +664,17 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert (out.parent / "diff.html").exists()
         assert "id_matching" not in json.loads(out.read_text())
+        summary = json.loads((out.parent / "diff.matching.json").read_text())
+        assert summary["entities"]["trip"]["by_step"] == {"exact days": 1}
+
+    def test_no_matching_summary_without_matching(self, tmp_path: Path):
+        base, new = _zips(tmp_path, _feed(BASE_TRIPS), _feed(BASE_TRIPS))
+        out = tmp_path / "diff.json"
+        result = CliRunner().invoke(
+            main, [str(base), str(new), "-o", str(out), "--no-id-matching"]
+        )
+        assert result.exit_code == 0, result.output
+        assert not (tmp_path / "diff.matching.json").exists()
 
     def test_missing_output_folder_is_created(self, tmp_path: Path):
         base, new = _zips(tmp_path, _feed(BASE_TRIPS), _feed(BASE_TRIPS))
@@ -890,6 +990,60 @@ class TestNotableHighlights:
         found = self._highlights(tmp_path, base_files, new_files)
         assert not self._of(found, "stop_removed")
 
+    def test_added_stop(self, tmp_path: Path):
+        new_files = _feed(BASE_TRIPS)
+        new_files["stops.txt"] += "S3,Third,45.60000,-73.60000\n"
+        new_files["stop_times.txt"] += "T1,S3,3,08:20:00,08:20:00\n"
+        found = self._highlights(tmp_path, _feed(BASE_TRIPS), new_files)
+        (h,) = self._of(found, "stop_added")
+        assert h["references"] == [
+            {"file_name": "stops.txt", "feed": "new", "identifier": {"stop_id": "S3"}}
+        ]
+        assert h["details"]["routes"] == ["10"]
+        assert h["details"]["new_trips"] == 1
+        assert h["message"].endswith("Served by route 10 (1 trip).")
+        # It replaces an old stop 60 m away.
+        base_files = _feed(BASE_TRIPS)
+        base_files["stops.txt"] += "O3,Third street,45.60054,-73.60000\n"
+        found = self._highlights(tmp_path, base_files, new_files)
+        assert not self._of(found, "stop_added")
+
+    def test_stop_order_changed(self, tmp_path: Path):
+        def order(stops):
+            base = _long_feed([("T1", "08", TEN), ("T2", "10", TEN)])
+            new = _long_feed([("X1", "08", stops), ("T2", "10", TEN)])
+            return self._of(self._highlights(tmp_path, base, new), "stop_order_changed")
+
+        (h,) = order([1, 3, 2, *TEN[3:]])
+        assert h["message"] == (
+            "On route 10, stop S03 (Stop 3) now comes after S01 (Stop 1) "
+            "instead of after S02 (Stop 2), on 1 trip."
+        )
+        assert h["details"]["stops"] == [
+            {"stop_id": "S03", "base_after": "S02", "new_after": "S01"}
+        ]
+        stops = [f"S{i:02d}" for i in TEN]
+        assert h["details"]["base_order"] == stops
+        assert h["details"]["new_order"] == [stops[0], stops[2], stops[1], *stops[3:]]
+        assert h["details"]["stop_names"]["S03"] == "Stop 3"
+        assert [r["identifier"] for r in h["references"]] == [
+            {"trip_id": "T1", "stop_sequence": "3"},
+            {"trip_id": "X1", "stop_sequence": "2"},
+        ]
+        # A stop added or removed keeps the order of the others.
+        assert not order([*TEN[:4], 11, *TEN[4:]])
+        assert not order([i for i in TEN if i != 5])
+
+    def test_moved_in_order(self):
+        from gtfs_diff.highlights import _moved_in_order
+
+        assert _moved_in_order(list("ABCDE"), list("ABCDE")) == ()
+        assert _moved_in_order(list("ABCDE"), list("BCDEA")) == (("A", None, "E"),)
+        assert _moved_in_order(list("ABCDE"), list("EDABC")) == (
+            ("E", "D", None),
+            ("D", "C", "E"),
+        )
+
     def test_moved_stop(self, tmp_path: Path):
         def moved(lat):
             files = _feed(BASE_TRIPS)
@@ -935,6 +1089,7 @@ class TestNotableHighlights:
             "as_of": "2026-01-01",
             "stop_moved_m": 50.0,
             "shape_moved_m": 50.0,
+            "fare_changed_pct": 50.0,
         }
         assert section["counts"] == {"shape_moved": 1}
         assert [h["code"] for h in section["items"]] == ["shape_moved"]
@@ -981,6 +1136,27 @@ class TestNotableHighlights:
         deleted = [r.identifier["stop_id"] for r in stops.row_changes.deleted]
         assert "X" in deleted and len(deleted) == 2
 
+    @pytest.mark.parametrize("threshold", [None, 0])
+    def test_added_stop_row_survives_the_cap(self, tmp_path: Path, threshold):
+        base_files, new_files = _feed(BASE_TRIPS), _feed(BASE_TRIPS)
+        for i in range(30):
+            lat = 45.6 + i * 0.01
+            base_files["stops.txt"] += f"E{i},Old {i},{lat:.5f},-73.60000\n"
+            new_files["stops.txt"] += f"R{i},New {i},{lat + 0.0003:.5f},-73.60000\n"
+        new_files["stops.txt"] += "X,Fresh,46.50000,-73.60000\n"
+        base, new = _zips(tmp_path, base_files, new_files)
+        run = run_diff(
+            base,
+            new,
+            row_changes_cap_per_file=4,
+            large_file_threshold_bytes=threshold,
+            as_of=date(2026, 1, 1),
+        )
+        added = [h for h in run.diff.highlights.items if h.code == "stop_added"]
+        assert [h.references[0].identifier for h in added] == [{"stop_id": "X"}]
+        rows = _file(run.diff, "stops.txt").row_changes.added
+        assert "X" in [r.identifier["stop_id"] for r in rows] and len(rows) == 2
+
     def test_caps_and_counts(self):
         from gtfs_diff.highlights import capped, counts
 
@@ -991,3 +1167,145 @@ class TestNotableHighlights:
         assert [h["code"] for h in kept].count("shape_moved") == 5
         assert kept[-1]["code"] == "stop_moved"
         assert capped(many, None) == many
+
+    @staticmethod
+    def _fares(prices: dict[str, str], products: dict[str, str] | None = None):
+        files = _feed(BASE_TRIPS)
+        files["fare_attributes.txt"] = (
+            "fare_id,price,currency_type,payment_method,transfers\n"
+            + "".join(f"{f},{p},USD,0,\n" for f, p in prices.items())
+        )
+        files["fare_rules.txt"] = "fare_id,route_id\n" + "".join(
+            f"{f},R1\n" for f in prices
+        )
+        if products:
+            files["fare_products.txt"] = (
+                "fare_product_id,fare_product_name,amount,currency\n"
+                + "".join(f"{f},Pass {f},{a},USD\n" for f, a in products.items())
+            )
+        return files
+
+    def test_fare_changed(self, tmp_path: Path):
+        base = self._fares({"A": "5.00", "B": "4.00", "C": "2.00", "D": "0.00"})
+        new = self._fares({"A": "0.00", "B": "7.00", "C": "2.50", "D": "1.50"})
+        found = self._highlights(tmp_path, base, new)
+        fares = self._of(found, "fare_changed")
+        by_id = {h["details"]["fare_id"]: h["details"] for h in fares}
+        assert set(by_id) == {"A", "B", "D"}  # C rose 25%: under the threshold
+        assert by_id["A"]["change_pct"] == -100.0 and by_id["A"]["new_price"] == 0
+        assert by_id["B"]["change_pct"] == 75.0
+        assert by_id["D"]["change_pct"] is None  # was free: no percentage
+        assert by_id["A"]["routes"] == ["10"]
+        assert "now free" in next(
+            h["message"] for h in fares if h["details"]["fare_id"] == "A"
+        )
+        assert self._id(fares[0], "base") == self._id(fares[0], "new")
+
+    def test_fare_changed_threshold_and_currency(self, tmp_path: Path):
+        base = self._fares({"C": "2.00"})
+        new = self._fares({"C": "2.50"})
+        assert not self._of(self._highlights(tmp_path, base, new), "fare_changed")
+        stricter = self._highlights(tmp_path, base, new, highlight_fare_changed_pct=20)
+        assert len(self._of(stricter, "fare_changed")) == 1
+        in_euros = dict(new)
+        in_euros["fare_attributes.txt"] = new["fare_attributes.txt"].replace(
+            "USD", "EUR"
+        )
+        assert not self._of(
+            self._highlights(tmp_path, base, in_euros, highlight_fare_changed_pct=0),
+            "fare_changed",
+        )
+
+    def test_fare_product_changed(self, tmp_path: Path):
+        base = self._fares({"A": "1"}, {"day": "10.00", "single": "2.50"})
+        new = self._fares({"A": "1"}, {"day": "4.00", "single": "2.60"})
+        found = self._of(self._highlights(tmp_path, base, new), "fare_changed")
+        (h,) = found
+        assert h["files"] == ["fare_products.txt"]
+        assert h["details"]["fare_product_id"] == "day"
+        assert h["details"]["change_pct"] == -60.0
+
+    @staticmethod
+    def _with_pathways(files):
+        files = dict(files)
+        files["pathways.txt"] = (
+            "pathway_id,from_stop_id,to_stop_id,pathway_mode,is_bidirectional,"
+            "traversal_time\nP1,S1,S2,1,1,30\n"
+        )
+        return files
+
+    def test_feature_added(self, tmp_path: Path):
+        base = _feed(BASE_TRIPS)
+        new = self._with_pathways(base)
+        new["fare_products.txt"] = (
+            "fare_product_id,amount,currency,rider_category_id\nP,1,USD,kid\n"
+        )
+        new["rider_categories.txt"] = "rider_category_id,rider_category_name\nkid,Kid\n"
+        found = self._of(self._highlights(tmp_path, base, new), "feature_added")
+        names = {h["details"]["feature"]: h["details"]["group"] for h in found}
+        assert names == {
+            "Fare Products": "Fares",
+            "Rider Categories": "Fares",
+            "Pathway Connections": "Pathways",
+            "In-station Traversal Time": "Pathways",
+        }
+
+    def test_feature_in_both_feeds_is_not_added(self, tmp_path: Path):
+        base = self._with_pathways(_feed(BASE_TRIPS))
+        found = self._highlights(tmp_path, base, base)
+        assert not self._of(found, "feature_added")
+
+    def test_feature_needs_the_gtfs_org_files_too(self, tmp_path: Path):
+        base = _feed(BASE_TRIPS)
+        new = dict(base)
+        new["levels.txt"] = "level_id,level_index\nL0,0\n"
+        new["areas.txt"] = "area_id\nZ1\n"
+        new["fare_products.txt"] = "fare_product_id,amount,currency\nP,1,USD\n"
+        new["fare_leg_rules.txt"] = "fare_product_id,from_area_id\nP,Z1\n"
+        found = self._of(self._highlights(tmp_path, base, new), "feature_added")
+        features = {h["details"]["feature"] for h in found}
+        assert "Zone-Based Fares" not in features  # no stop_areas.txt
+        assert "Levels" not in features  # no level_id in stops.txt
+        new["stop_areas.txt"] = "area_id,stop_id\nZ1,S1\n"
+        new["stops.txt"] = (
+            new["stops.txt"]
+            .replace("stop_lon", "stop_lon,level_id")
+            .replace("-73.50000", "-73.50000,L0")
+            .replace("-73.51000", "-73.51000,L0")
+        )
+        found = self._of(self._highlights(tmp_path, base, new), "feature_added")
+        features = {h["details"]["feature"] for h in found}
+        assert {"Zone-Based Fares", "Levels"} <= features
+
+    def test_feature_removed_and_fares_v1(self, tmp_path: Path):
+        base = _feed(BASE_TRIPS)
+        base["fare_transfer_rules.txt"] = (
+            "from_leg_group_id,to_leg_group_id,fare_transfer_type\nL1,L2,0\n"
+        )
+        new = self._fares({"A": "1"})
+        found = self._highlights(tmp_path, base, new)
+        added = {h["details"]["feature"] for h in self._of(found, "feature_added")}
+        removed = {h["details"]["feature"] for h in self._of(found, "feature_removed")}
+        assert added == {"Fares V1"}
+        assert removed == {"Fare Transfers"}
+
+    def test_feature_links_to_gtfs_org(self, tmp_path: Path):
+        from gtfs_diff.highlights import FEATURE_URLS
+
+        base = _feed(BASE_TRIPS)
+        found = self._highlights(tmp_path, base, self._with_pathways(base))
+        for h in self._of(found, "feature_added"):
+            url = h["details"]["url"]
+            assert url == FEATURE_URLS[h["details"]["feature"]]
+            assert url.startswith("https://gtfs.org/getting_started/features/")
+
+    def test_feature_lists_its_gtfs_org_files_and_fields(self, tmp_path: Path):
+        base = _feed(BASE_TRIPS)
+        found = self._highlights(tmp_path, base, self._with_pathways(base))
+        (h,) = [
+            h
+            for h in self._of(found, "feature_added")
+            if h["details"]["feature"] == "In-station Traversal Time"
+        ]
+        assert h["details"]["fields"] == {"pathways.txt": ["traversal_time"]}
+        assert h["files"] == ["pathways.txt"]

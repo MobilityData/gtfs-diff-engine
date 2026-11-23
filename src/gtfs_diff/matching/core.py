@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..geometry import METERS_PER_DEGREE
+from ..geometry import METERS_PER_DEGREE, sql_path
 from ..gtfs_definitions import get_primary_key
 from ..tracing import _trace
 
@@ -15,6 +15,8 @@ STOP_RADIUS_M = 5.0
 # Longitude cells are widened so neighbouring cells cover the radius up to ~72°.
 MIN_COS_LAT = 0.3
 SHAPE_NEAR_M = 30.0
+# Matched shapes whose lines stay this close everywhere are unchanged.
+DEFAULT_SHAPE_TOLERANCE_M = 1.0
 SHAPE_CELL_M = 250.0
 SHAPE_SAMPLES = 32
 # Trips left unpaired may still pair when their times moved by up to this many
@@ -41,7 +43,15 @@ MATCH_COLUMNS: dict[str, list[str]] = {
         "route_long_name",
         "route_type",
     ],
-    "trips.txt": ["trip_id", "route_id", "service_id", "direction_id", "shape_id"],
+    "trips.txt": [
+        "trip_id",
+        "route_id",
+        "service_id",
+        "direction_id",
+        "shape_id",
+        "trip_headsign",
+        "trip_short_name",
+    ],
     "stop_times.txt": [
         "trip_id",
         "stop_id",
@@ -183,7 +193,46 @@ class MatchResult:
     shape_changes: list[ShapeChange] | None = None
     # Notable highlights (see gtfs_diff.highlights), when asked for.
     highlights: list[dict] | None = None
+    # The highlight checks that ran: service, stops, stop_order, shapes, fares.
+    highlight_checks: list[str] | None = None
+    # {kind: parquet of the pairs whose ID changed, with how each was found}.
+    renamed: dict[str, str] = field(default_factory=dict)
     workdir: str | None = None
+
+    def explain(
+        self, ids: dict[str, set[str]], per_step: int = 0
+    ) -> dict[str, dict[str, dict]]:
+        """How the changed IDs in *ids* ({kind: new IDs}), and the first
+        *per_step* changed IDs of each step, were matched:
+        {kind: {new ID: {old_id, how, and the figures behind it}}}."""
+        import duckdb
+
+        out: dict[str, dict[str, dict]] = {}
+        with duckdb.connect() as con:
+            for kind, path in self.renamed.items():
+                cursor = con.execute(
+                    """
+                    SELECT * FROM read_parquet($path)
+                    WHERE new_id IN (SELECT unnest($ids::VARCHAR[]))
+                    UNION
+                    SELECT * FROM read_parquet($path)
+                    QUALIFY row_number() OVER (PARTITION BY how ORDER BY new_id)
+                            <= $per_step
+                    """,
+                    {
+                        "path": path,
+                        "ids": sorted(ids.get(kind, ())),
+                        "per_step": per_step,
+                    },
+                )
+                names = [d[0] for d in cursor.description]
+                for row in cursor.fetchall():
+                    item = dict(zip(names, row, strict=True))
+                    new_id = item.pop("new_id")
+                    out.setdefault(kind, {})[new_id] = {
+                        k: v for k, v in item.items() if v is not None
+                    }
+        return out
 
     def translation_for(
         self, file_name: str, include_key_changes: bool = False
@@ -276,8 +325,15 @@ class MatcherBase:
     def has(self, *names: str) -> bool:
         return all(n in self.paths["old"] and n in self.paths["new"] for n in names)
 
-    def load(self, side: str, name: str, columns: list[str]) -> None:
-        table = f"{side}_{name.removesuffix('.txt')}"
+    def has_calendar(self) -> bool:
+        """Each feed has calendar.txt or calendar_dates.txt, not always the same."""
+        return all(
+            "calendar.txt" in p or "calendar_dates.txt" in p
+            for p in self.paths.values()
+        )
+
+    def load(self, side: str, name: str, columns: list[str], prefix: str = "") -> None:
+        table = f"{prefix}{side}_{name.removesuffix('.txt')}"
         path = self.paths[side].get(name)
         if path is None:
             nulls = ", ".join(f"NULL::VARCHAR AS {c}" for c in columns)
@@ -376,7 +432,7 @@ class MatcherBase:
             """
         )
         self.con.execute(f"DELETE FROM keys_{kind} WHERE key IS NULL OR key = new")
-        self.con.execute(f"COPY keys_{kind} TO '{path}' (FORMAT parquet)")
+        self.con.execute(f"COPY keys_{kind} TO {sql_path(path)} (FORMAT parquet)")
         self.result.keys[kind] = dict(
             self.con.execute(f"SELECT new, key FROM keys_{kind}").fetchall()
         )
@@ -403,3 +459,64 @@ class MatcherBase:
             "by_step": by_step,
             "duration_seconds": round(seconds, 2),
         }
+        if renamed:
+            self.export_renamed(kind)
+
+    def export_renamed(self, kind: str) -> None:
+        """Write the kind's pairs whose ID changed, with the figures behind each."""
+        joins, figures = self.pair_figures(kind)
+        path = str(Path(self.result.workdir) / f"renamed_{kind}.parquet")
+        self.con.execute(
+            f"""
+            COPY (
+                SELECT p.new_id, p.old_id, p.how{figures}
+                FROM pairs_{kind} p {joins}
+                WHERE p.old_id <> p.new_id
+            ) TO {sql_path(path)} (FORMAT parquet)
+            """
+        )
+        self.result.renamed[kind] = path
+
+    def pair_figures(self, kind: str) -> tuple[str, str]:
+        """Joins and columns for each pair's figures: stop distance, trip time
+        shift and shared stops, or the matched trips linking two entities."""
+
+        def on(t: str) -> str:
+            return f"ON {t}.old_id = p.old_id AND {t}.new_id = p.new_id"
+
+        if kind == "stop":
+            return (
+                "LEFT JOIN (SELECT old_id, new_id, min(meters) AS meters, "
+                "bool_or(same_name) AS same_name FROM stop_candidates "
+                f"GROUP BY ALL) d {on('d')}",
+                ", round(d.meters, 1) AS meters, d.same_name",
+            )
+        if kind == "trip":
+            joins, shifts, shared = [], [], "NULL::DOUBLE"
+            if self.shifts is not None:
+                joins.append(f"LEFT JOIN trip_shifts s {on('s')}")
+                shifts.append("s.shift_s")
+            if self.stop_changes is not None:
+                joins.append(f"LEFT JOIN stop_change_pairs x {on('x')}")
+                shifts.append("x.shift_s")
+                shared = "round(x.shared, 3)"
+            shift = f"coalesce({', '.join(shifts)}, NULL)" if shifts else "NULL"
+            return " ".join(joins), f", {shift}::INTEGER AS shift_s, {shared} AS shared"
+        col = {"route": "route_id", "service": "service_id", "shape": "shape_id"}.get(
+            kind
+        )
+        if col is None or not self.q(
+            f"SELECT count(*) FROM pairs_{kind} "
+            "WHERE how = 'trip votes' AND old_id <> new_id"
+        ):
+            return "", ""
+        return (
+            f"""LEFT JOIN (
+                SELECT o.{col} AS old_id, n.{col} AS new_id, count(*) AS trips
+                FROM pairs_trip t
+                JOIN old_trips o ON o.trip_id = t.old_id
+                JOIN new_trips n ON n.trip_id = t.new_id
+                WHERE o.{col} <> n.{col}
+                GROUP BY ALL) v {on("v")} AND p.how = 'trip votes'""",
+            ", v.trips",
+        )

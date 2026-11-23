@@ -473,9 +473,14 @@ def _diff_file_modified(
             row_changes_cap, true_added, true_deleted, true_modified
         )
 
-        # Fill added rows up to allocated cap (earliest rows first, by line).
-        added_order = sorted(added_keys, key=lambda k: new_index[k][0])
-        for pk_tuple in added_order[:added_limit]:
+        # Fill added and deleted rows up to their caps: rows behind notable
+        # highlights (*keep*) first, then the earliest, listed in line order.
+        keep = keep or set()
+        added_order = sorted(
+            added_keys, key=lambda k: (k not in keep, new_index[k][0])
+        )[:added_limit]
+        added_order.sort(key=lambda k: new_index[k][0])
+        for pk_tuple in added_order:
             n_line, n_raw = new_index[pk_tuple]
             n_dict = _parse_raw_line(n_raw, new_headers)
             identifier, raw_value = _build_identifier_and_raw(
@@ -487,9 +492,6 @@ def _diff_file_modified(
                 )
             )
 
-        # Fill deleted rows up to allocated cap (earliest rows first, by line).
-        # Rows behind notable highlights (*keep*) first, then the earliest.
-        keep = keep or set()
         deleted_order = sorted(
             deleted_keys, key=lambda k: (k not in keep, base_index[k][0])
         )[:deleted_limit]

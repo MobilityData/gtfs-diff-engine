@@ -224,7 +224,7 @@ def diff_modified_duckdb(
 ) -> tuple[FileDiff, FileSummary]:
     """Compute the "modified" diff for a large file using DuckDB.
 
-    Rows whose base key is in *keep* (behind notable highlights) are kept first
+    Rows whose key is in *keep* (behind notable highlights) are kept first
     when the cap trims the row changes.
 
     The caller (``gtfs_diff.diff.files``) guarantees the file exists in both feeds
@@ -383,6 +383,7 @@ def diff_modified_duckdb(
                 new_header_set=new_header_set,
                 limit=added_limit,
                 pk_join=pk_join,
+                keep=keep,
             )
             deleted_rows = _collect_deleted(
                 con,
@@ -585,6 +586,23 @@ def _modified_row(
     )
 
 
+def _keep_first(con, pk_cols: list[str], keep: set[tuple] | None, alias: str) -> str:
+    """An ORDER BY prefix putting rows of *alias* whose key is in *keep* first."""
+    if not keep:
+        return ""
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE keep_t ("
+        + ", ".join(f"{_q(c)} VARCHAR" for c in pk_cols)
+        + ")"
+    )
+    con.executemany(
+        f"INSERT INTO keep_t VALUES ({', '.join('?' for _ in pk_cols)})",
+        [list(k) for k in keep],
+    )
+    match = " AND ".join(f"k.{_q(c)} = {alias}.{_q(c)}" for c in pk_cols)
+    return f"EXISTS (SELECT 1 FROM keep_t k WHERE {match}) DESC, "
+
+
 def _collect_added(
     con,
     pk_cols: list[str],
@@ -593,19 +611,21 @@ def _collect_added(
     new_header_set: set[str],
     limit: int | None,
     pk_join: str | None = None,
+    keep: set[tuple] | None = None,
 ) -> list[RowAdded]:
-    """Fetch up to *limit* rows present only in the new feed."""
+    """Fetch up to *limit* rows present only in the new feed, rows whose key
+    is in *keep* first."""
     if limit == 0:
         return []
     pk_eq = pk_join or " AND ".join(f"b.{_q(c)} = n.{_q(c)}" for c in pk_cols)
     cols = ", ".join(f"n.{_q(c)} AS {_q(c)}" for c in new_headers)
     sql = (
-        f"SELECT n.__line AS __line, {cols} FROM new_t n "
+        f"SELECT * FROM (SELECT n.__line AS __line, {cols} FROM new_t n "
         f"WHERE NOT EXISTS (SELECT 1 FROM base_t b WHERE {pk_eq})"
-        f" ORDER BY n.__line"
+        f" ORDER BY {_keep_first(con, pk_cols, keep, 'n')}n.__line"
+        + (f" LIMIT {int(limit)}" if limit is not None else "")
+        + ") ORDER BY __line"
     )
-    if limit is not None:
-        sql += f" LIMIT {int(limit)}"
 
     cur = con.execute(sql)
     idx = {d[0]: i for i, d in enumerate(cur.description)}
@@ -641,23 +661,10 @@ def _collect_deleted(
         return []
     pk_eq = pk_join or " AND ".join(f"n.{_q(c)} = b.{_q(c)}" for c in pk_cols)
     cols = ", ".join(f"b.{_q(c)} AS {_q(c)}" for c in base_headers)
-    first = ""
-    if keep:
-        con.execute(
-            "CREATE OR REPLACE TEMP TABLE keep_t ("
-            + ", ".join(f"{_q(c)} VARCHAR" for c in pk_cols)
-            + ")"
-        )
-        con.executemany(
-            f"INSERT INTO keep_t VALUES ({', '.join('?' for _ in pk_cols)})",
-            [list(k) for k in keep],
-        )
-        match = " AND ".join(f"k.{_q(c)} = b.{_q(c)}" for c in pk_cols)
-        first = f"EXISTS (SELECT 1 FROM keep_t k WHERE {match}) DESC, "
     sql = (
         f"SELECT * FROM (SELECT b.__line AS __line, {cols} FROM base_t b "
         f"WHERE NOT EXISTS (SELECT 1 FROM new_t n WHERE {pk_eq})"
-        f" ORDER BY {first}b.__line"
+        f" ORDER BY {_keep_first(con, pk_cols, keep, 'b')}b.__line"
         + (f" LIMIT {int(limit)}" if limit is not None else "")
         + ") ORDER BY __line"
     )

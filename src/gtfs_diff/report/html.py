@@ -10,10 +10,11 @@ import io
 import json
 from importlib import resources
 
-from ..diff.run import DiffRun
+from ..diff.run import ID_EXAMPLES_PER_STEP, DiffRun
 from ..geometry import METERS_PER_DEGREE
 from ..highlights import REPLACEMENT_M, capped, keep_rows
-from ..matching import ShapeChange
+from ..matching import ID_COLUMNS, ShapeChange
+from ..matching.core import SHAPE_NEAR_M, STOP_RADIUS_M
 from ..models import GtfsDiff
 from .shape_points import HTML_SHAPE_POINTS, _drawn_points, pack
 
@@ -53,32 +54,47 @@ def render_html(
         shown = capped(items, HTML_HIGHLIGHTS_SHOWN)
     # Rows behind the highlights shown are always in the page, to jump to.
     focus = keep_rows(shown or [])
+    files = [
+        _file_payload(
+            fd,
+            row_cap,
+            run.new_identifiers.get(fd.file_name, {}),
+            focus.get(fd.file_name, set()),
+        )
+        for fd in diff.file_diffs
+    ] + [_unchanged_payload(f) for f in run.files_unchanged]
+    # Changed IDs listed per matching step; the run keeps at most this many.
+    id_cap = min(row_cap, ID_EXAMPLES_PER_STEP)
     payload = {
         "metadata": metadata,
         "summary": summary,
-        "files": [
-            _file_payload(
-                fd,
-                row_cap,
-                run.new_identifiers.get(fd.file_name, {}),
-                focus.get(fd.file_name, set()),
-            )
-            for fd in diff.file_diffs
-        ]
-        + [_unchanged_payload(f) for f in run.files_unchanged],
-        "caps": {"rows": row_cap, "shapes": shape_cap, "points": HTML_SHAPE_POINTS},
+        "files": files,
+        "matching": run.matching,
+        "id_matches": _shown_matches(files, run.id_matches, id_cap),
+        "id_columns": {
+            f["name"]: ID_COLUMNS[f["name"]] for f in files if f["name"] in ID_COLUMNS
+        },
+        "caps": {
+            "rows": row_cap,
+            "ids": id_cap,
+            "shapes": shape_cap,
+            "points": HTML_SHAPE_POINTS,
+        },
         "shapes": _shapes_payload(run.shape_changes, shape_cap, shown),
         "highlights": shown,
         "highlight_counts": (
             found.model_dump(mode="json")["counts"] if found is not None else None
         ),
         "highlight_parameters": found.parameters if found is not None else None,
+        "highlight_checks": run.highlight_checks,
         "settings": settings_rows(run.parameters, row_cap),
         "constants": constants(),
     }
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
     template = resources.files("gtfs_diff.report").joinpath("template.html").read_text()
-    return template.replace("/*DATA*/null", data.replace("</", "<\\/"))
+    # Every "<" escaped: "<!--" in feed text could otherwise keep the
+    # script element open past its end.
+    return template.replace("/*DATA*/null", data.replace("<", "\\u003c"))
 
 
 def constants() -> dict:
@@ -88,8 +104,31 @@ def constants() -> dict:
     return {
         "meters_per_degree": METERS_PER_DEGREE,
         "stop_replacement_m": REPLACEMENT_M,
+        "stop_radius_m": STOP_RADIUS_M,
+        "shape_near_m": SHAPE_NEAR_M,
         "min_cap": MIN_CAP,
     }
+
+
+def _shown_matches(files: list[dict], matches: dict, cap: int) -> dict:
+    """How changed IDs were matched: up to *cap* per step, and those in the
+    page's modified rows."""
+    out: dict[str, dict] = {}
+    for kind, items in matches.items():
+        per_step: dict[str, int] = {}
+        for new_id in sorted(items):
+            how = items[new_id]["how"]
+            if per_step.get(how, 0) < cap:
+                per_step[how] = per_step.get(how, 0) + 1
+                out.setdefault(kind, {})[new_id] = items[new_id]
+    for f in files:
+        kinds = ID_COLUMNS.get(f["name"], {})
+        for row in f.get("modified", []):
+            for col, value in (row["new_id"] or {}).items():
+                found = matches.get(kinds.get(col), {}).get(value)
+                if found:
+                    out.setdefault(kinds[col], {})[value] = found
+    return out
 
 
 def settings_rows(parameters: dict | None, html_cap: int) -> list[list[str]] | None:
@@ -120,6 +159,7 @@ def settings_rows(parameters: dict | None, html_cap: int) -> list[list[str]] | N
         "trip_min_shared_stops": pct(p.get("trip_min_shared_stops")),
         "include_key_changes": on(p.get("include_key_changes")),
         "shape_geometry": on(p.get("shape_geometry")),
+        "shape_tolerance_m": f"{p.get('shape_tolerance_m', 0):g} m",
         "id_churn_threshold": pct(p.get("id_churn_threshold")),
         "id_churn_threshold_for": ", ".join(f"{f} {pct(v)}" for f, v in churn.items())
         or "none",
@@ -128,6 +168,7 @@ def settings_rows(parameters: dict | None, html_cap: int) -> list[list[str]] | N
         "as_of": p.get("as_of") or "today",
         "highlight_stop_moved_m": f"{p.get('highlight_stop_moved_m', 0):g} m",
         "highlight_shape_moved_m": f"{p.get('highlight_shape_moved_m', 0):g} m",
+        "highlight_fare_changed_pct": f"{p.get('highlight_fare_changed_pct', 0):g}%",
     }
     options = {o.name: o for o in main.params if isinstance(o, click.Option)}
     return [[options[k].opts[0], v, options[k].help or ""] for k, v in values.items()]
@@ -170,14 +211,16 @@ def _file_payload(
         return out
     out["primary_key"] = rc.primary_key
     out["columns"] = rc.columns
-    out["added"] = [
-        [r.new_line_number, _split(r.raw_value)] for r in rc.added[:row_cap]
-    ]
     focus = focus or set()
 
     def key(r):
         return tuple(r.identifier.get(c, "") for c in rc.primary_key)
 
+    out["added"] = [
+        [r.new_line_number, _split(r.raw_value)]
+        for i, r in enumerate(rc.added)
+        if i < row_cap or key(r) in focus
+    ]
     out["deleted"] = [
         [r.base_line_number, _split(r.raw_value)]
         for i, r in enumerate(rc.deleted)
